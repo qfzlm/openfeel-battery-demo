@@ -1,0 +1,22 @@
+﻿# Android/Gradle local machine files
+local.properties
+
+# Gradle caches and local user homes (project-local)
+.gradle/
+.gradle-user-home/
+.gradle-user-home-proxybuild/
+.gradle-user-home-proxytest*/
+
+# Build outputs
+**/build/
+
+# Logs and temp files
+*.log
+
+# IDE files
+.idea/
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db
