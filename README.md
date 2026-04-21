@@ -1,42 +1,85 @@
-# 弱水时砂耳机电量
+# Earbud Battery (Android)
 
-一个面向个人长期使用的极简 Android 工具，用于快速读取弱水时砂openfeel耳机总电量和分电量，目标是替代官方 App 的重流程和不稳定体验。
+A lightweight Android app for fast, reliable earbud battery checks.
 
-## 当前定位
-- 只做一件事：稳定、快速地读取电量
-- 优先保证连接链路和结果更新速度
-- 不做多设备管理、不做复杂设置页
+> Personal daily-use tool: stable connection, quick refresh, minimal UI.
 
-## 当前已验证能力
-- 刷新时自动完成：连接 -> 读取总电量
-- 自动启用私有回包通知并发送两条已验证命令，获取分电量帧
-- 解析分电量帧
-- 首页显示：总电量、最近更新时间、连接状态、左/右/充电仓
-- 导出日志到 Download
+## Features
 
-## 使用
--直接在release下载使用
+- One-tap refresh for both total battery and split battery.
+- Stable total battery fallback via standard `180F / 2A19`.
+- Split battery pipeline from validated private frame:
+  - `DD ?? 04 0C XX YY ZZ AA`
+  - Left: `XX & 0x7F`
+  - Right: `YY & 0x7F`
+  - Case: `ZZ & 0x7F`
+- Keeps last successful values after temporary disconnects.
+- Export logs to `Download` (MediaStore).
 
-## 本地构建
-1. 环境准备
-   - JDK 17
-   - Android SDK（`android-35`、对应 build-tools）
-2. 配置 `local.properties`
-   - `sdk.dir=你的 Android SDK 路径`
-3. 使用项目自带 Wrapper 构建
-   - Windows: `gradlew.bat -p E:\py\erji\TwsBatteryDemo :app:assembleDebug --no-daemon`
-4. APK 路径
-   - `app/build/outputs/apk/debug/app-debug.apk`
+## Supported Device Scope (Current)
 
-## 权限与运行要求
-- 设备支持 BLE
-- Android 12+：`BLUETOOTH_SCAN`、`BLUETOOTH_CONNECT`
-- Android 11 及以下：扫描需位置权限
+- Primary target: `41:42:D3:16:6F:68`
+- Matching signals:
+  - Manufacturer ID `0x0A0B`
+  - MAC prefix `41:42`
 
-## 已知限制
-- 当前为单设备主线，不做多设备并行支持
-- 充电状态语义暂未正式 UI 化（仅保留日志观察）
-- 不发送除已验证两条命令以外的未知私有命令
+This project is intentionally scoped for a validated personal target path, not generic multi-device support.
 
-## 免责声明
-本项目为个人研究与自用工具，协议相关实现基于实测与逆向线索整理，不保证适配所有设备或固件版本。
+## UI (Production)
+
+Home screen keeps only essential info:
+
+- Total battery
+- Last update time
+- Connection status
+- Left / Right / Case battery
+- Refresh button
+- Export logs button
+
+No debug panels, no candidate list, no GATT raw detail shown to users.
+
+## Build
+
+### Requirements
+
+- JDK 17
+- Android SDK (`android-35` + matching build-tools)
+
+### Build command (Windows)
+
+```powershell
+gradlew.bat -p E:\py\erji\TwsBatteryDemo :app:assembleDebug --no-daemon
+```
+
+APK output:
+
+```text
+app/build/outputs/apk/debug/app-debug.apk
+```
+
+## Runtime Permissions
+
+- Android 12+: `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT`
+- Android 11 and below: location permission is required for BLE scan
+
+## Cache Rules
+
+- Total and split battery cache keep the latest successful values.
+- Failed refresh does not clear previous valid values.
+- Temporary disconnect does not clear previous valid values.
+- `N/A` / `--` appears only when there has never been a successful read.
+
+## Known Limits
+
+- Single target path by design (no multi-device session management).
+- Charging-state semantics are intentionally not exposed as formal UI yet.
+- No unknown private write commands are sent.
+
+## Changelog / Releases
+
+- See GitHub Releases and `RELEASE_NOTES_v0.2.0.md`.
+
+## Disclaimer
+
+This is a personal utility project based on practical validation and reverse-engineering clues.
+Compatibility is not guaranteed for all firmware or hardware variants.
