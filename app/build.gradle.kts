@@ -11,8 +11,8 @@ android {
         applicationId = "com.budsbattery.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 25
-        versionName = "0.1.0-dev-20260412-1105"
+        versionCode = 26
+        versionName = "0.2.0-dev-20260417-2300"
     }
 
     buildTypes {

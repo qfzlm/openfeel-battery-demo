@@ -5,11 +5,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.twsbatterydemo.ble.BleScannerManager
-import com.example.twsbatterydemo.ble.OpenFeelTargetSelector
+import com.example.twsbatterydemo.model.BatteryReadUiState
 import com.example.twsbatterydemo.model.LogExportUiState
-import com.example.twsbatterydemo.model.OpenFeelProbeState
 import com.example.twsbatterydemo.model.ScanUiState
-import com.example.twsbatterydemo.model.ScannedDeviceObservation
 import com.example.twsbatterydemo.util.DownloadLogExporter
 import com.example.twsbatterydemo.util.InMemoryLogStore
 import com.example.twsbatterydemo.util.TimeUtils
@@ -18,17 +16,16 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 class MainViewModel(
     private val bleScannerManager: BleScannerManager
 ) : ViewModel() {
 
     private val logStore = InMemoryLogStore(capacity = 1000)
-    private val targetSelector = OpenFeelTargetSelector()
-    private var isObservationScanActive: Boolean = false
+    private val exportFormatter = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss")
+    private var isScanActive = false
 
     private val _uiState = MutableStateFlow(ScanUiState())
     val uiState: StateFlow<ScanUiState> = _uiState
@@ -38,19 +35,19 @@ class MainViewModel(
         val bluetoothEnabled = bleScannerManager.isBluetoothEnabled()
         val hasRequiredPermissions = missingPermissions.isEmpty()
 
-        _uiState.update {
-            it.copy(
+        _uiState.update { current ->
+            current.copy(
                 bluetoothEnabled = bluetoothEnabled,
                 hasRequiredPermissions = hasRequiredPermissions,
                 missingPermissions = missingPermissions,
-                errorMessage = if (hasRequiredPermissions && bluetoothEnabled) null else it.errorMessage
+                errorMessage = if (hasRequiredPermissions && bluetoothEnabled) null else current.errorMessage
             )
         }
 
         if (hasRequiredPermissions && bluetoothEnabled) {
-            ensureObservationScan()
+            ensureBackgroundScan()
         } else {
-            stopObservationScan()
+            stopScan()
         }
     }
 
@@ -67,26 +64,23 @@ class MainViewModel(
             return
         }
 
-        val targetMac = targetSelector.currentTargetMac()
-        recordLog("battery_refresh targetMac=$targetMac")
-        bleScannerManager.readBattery(
-            macAddress = targetMac,
-            enableSplitBatteryExperiment = true,
-            autoTriggerSplitBatteryAfterReady = true,
+        recordLog("refresh_requested targetMac=41:42:D3:16:6F:68")
+        val started = bleScannerManager.refreshBattery(
             onLog = ::recordLog,
-            onProbeState = ::updateProbeState
+            onState = ::updateBatteryState
         )
+        if (!started) {
+            _uiState.update { it.copy(errorMessage = "刷新失败，请确认耳机已开盖") }
+        }
     }
 
     fun exportLogs(context: Context) {
         viewModelScope.launch(Dispatchers.IO) {
-            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-            val displayName = "ble_log_${timestamp}.txt"
-            val content = logStore.snapshot().joinToString("\n")
+            val displayName = "ble_log_${LocalDateTime.now().format(exportFormatter)}.txt"
             val result = DownloadLogExporter.exportText(
                 context = context,
                 displayName = displayName,
-                content = content
+                content = logStore.snapshot().joinToString("\n")
             )
             recordLog(
                 "log_export result=${result.message} uri=${result.contentUri ?: "null"} size=${result.sizeBytes ?: -1}"
@@ -103,67 +97,33 @@ class MainViewModel(
         }
     }
 
-
     fun stopScan() {
-        stopObservationScan()
+        if (!isScanActive) return
+        bleScannerManager.stopScan()
+        isScanActive = false
     }
 
-    private fun ensureObservationScan() {
-        if (isObservationScanActive) return
+    private fun ensureBackgroundScan() {
+        if (isScanActive) return
 
         val started = bleScannerManager.startScan(
             onError = { message ->
                 recordLog("scan_error message=$message")
                 _uiState.update { it.copy(errorMessage = message) }
             },
-            onDebugLog = ::recordLog,
-            onScanSeenDevice = ::recordObservation
+            onDebugLog = ::recordLog
         )
 
         if (started) {
-            isObservationScanActive = true
+            isScanActive = true
             _uiState.update { it.copy(errorMessage = null) }
         }
     }
 
-    private fun stopObservationScan() {
-        if (!isObservationScanActive) return
-        bleScannerManager.stopScan()
-        isObservationScanActive = false
-    }
-
-    private fun recordObservation(observation: ScannedDeviceObservation) {
-        targetSelector.recordObservation(observation)
-        recordLog(
-            "target_observation mac=${observation.macAddress} " +
-                "name=${observation.deviceName ?: "null"} " +
-                "lastRssi=${observation.lastRssi} " +
-                "firstSeen=${TimeUtils.format(observation.firstSeenAt)} " +
-                "lastSeen=${TimeUtils.format(observation.lastSeenAt)} " +
-                "reasons=${observation.matchReasons.joinToString("|")}"
-        )
-    }
-
-    private fun updateProbeState(state: OpenFeelProbeState) {
-        if (state.batteryLevelPercent != null) {
-            targetSelector.markSuccessfulBatteryRead(state.targetMac)
-        }
-
+    private fun updateBatteryState(newState: BatteryReadUiState) {
         _uiState.update { current ->
-            val currentBattery = current.batteryReadState
             current.copy(
-                batteryReadState = currentBattery.copy(
-                    isConnecting = state.isConnecting,
-                    isConnected = state.isConnected,
-                    batteryLevelPercent = state.batteryLevelPercent ?: currentBattery.batteryLevelPercent,
-                    experimentalSplitBattery = state.experimentalSplitBattery ?: currentBattery.experimentalSplitBattery,
-                    manualExperimentStatus = state.manualExperimentStatus,
-                    lastUpdatedAt = if (state.lastBatteryUpdatedAt > 0L) {
-                        state.lastBatteryUpdatedAt
-                    } else {
-                        currentBattery.lastUpdatedAt
-                    }
-                ),
+                batteryReadState = newState,
                 errorMessage = null
             )
         }
@@ -174,7 +134,7 @@ class MainViewModel(
     }
 
     override fun onCleared() {
-        stopObservationScan()
+        stopScan()
         bleScannerManager.disconnectBatterySession()
         super.onCleared()
     }

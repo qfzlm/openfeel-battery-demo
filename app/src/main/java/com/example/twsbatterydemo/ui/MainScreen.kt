@@ -60,7 +60,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.twsbatterydemo.model.ExperimentalSplitBattery
 import com.example.twsbatterydemo.model.ScanUiState
 import com.example.twsbatterydemo.util.TimeUtils
 
@@ -105,9 +104,9 @@ fun MainScreen(
     onRefreshBattery: () -> Unit,
     onExportLogs: () -> Unit
 ) {
-    val batteryLevel = state.batteryReadState.batteryLevelPercent
+    val batteryLevel = state.batteryReadState.totalBatteryPercent
     val status = when {
-        state.batteryReadState.isConnecting -> StatusUiState.Reading
+        state.batteryReadState.isRefreshing -> StatusUiState.Reading
         state.batteryReadState.isConnected -> StatusUiState.Connected
         else -> StatusUiState.Disconnected
     }
@@ -234,8 +233,10 @@ fun MainScreen(
                             fontWeight = FontWeight.Medium,
                             letterSpacing = 0.sp
                         )
-                        ExperimentalBatteryRow(
-                            data = state.batteryReadState.experimentalSplitBattery,
+                        SplitBatteryRow(
+                            leftBattery = state.batteryReadState.leftBatteryPercent,
+                            rightBattery = state.batteryReadState.rightBatteryPercent,
+                            caseBattery = state.batteryReadState.caseBatteryPercent,
                             modifier = Modifier.padding(top = 10.dp)
                         )
                     }
@@ -258,7 +259,7 @@ fun MainScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 RefreshBatteryButton(
-                    isLoading = state.batteryReadState.isConnecting,
+                    isLoading = state.batteryReadState.isRefreshing,
                     onClick = onRefreshBattery
                 )
                 SecondaryActionButton(
@@ -271,13 +272,15 @@ fun MainScreen(
 }
 
 @Composable
-private fun ExperimentalBatteryRow(
-    data: ExperimentalSplitBattery?,
+private fun SplitBatteryRow(
+    leftBattery: Int?,
+    rightBattery: Int?,
+    caseBattery: Int?,
     modifier: Modifier = Modifier
 ) {
-    val left = data?.leftBattery?.toString() ?: "--"
-    val right = data?.rightBattery?.toString() ?: "--"
-    val case = data?.caseBattery?.toString() ?: "--"
+    val left = leftBattery?.toString() ?: "--"
+    val right = rightBattery?.toString() ?: "--"
+    val case = caseBattery?.toString() ?: "--"
     Row(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(12.dp),

@@ -38,7 +38,7 @@ object DownloadLogExporter {
                     displayName = displayName,
                     contentUri = null,
                     sizeBytes = null,
-                    message = "导出失败: 无法创建 MediaStore 记录"
+                    message = "导出失败：无法创建下载记录"
                 )
 
             resolver.openOutputStream(uri)?.use { outputStream ->
@@ -48,14 +48,14 @@ object DownloadLogExporter {
                 displayName = displayName,
                 contentUri = uri.toString(),
                 sizeBytes = null,
-                message = "导出失败: 无法打开输出流"
+                message = "导出失败：无法打开输出流"
             )
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val completeValues = ContentValues().apply {
+                val completedValues = ContentValues().apply {
                     put(MediaStore.Downloads.IS_PENDING, 0)
                 }
-                resolver.update(uri, completeValues, null, null)
+                resolver.update(uri, completedValues, null, null)
             }
 
             LogExportResult(
@@ -64,12 +64,12 @@ object DownloadLogExporter {
                 sizeBytes = bytes.size.toLong(),
                 message = "导出成功"
             )
-        } catch (e: Exception) {
+        } catch (exception: Exception) {
             LogExportResult(
                 displayName = displayName,
                 contentUri = null,
                 sizeBytes = null,
-                message = "导出失败: ${e.message ?: e.javaClass.simpleName}"
+                message = "导出失败：${exception.message ?: exception.javaClass.simpleName}"
             )
         }
     }
