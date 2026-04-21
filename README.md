@@ -1,5 +1,9 @@
 # Earbud Battery (Android)
 
+[![Android CI](https://img.shields.io/github/actions/workflow/status/qfzlm/py/android-ci.yml?branch=main&label=Android%20CI)](https://github.com/qfzlm/py/actions/workflows/android-ci.yml)
+[![Release](https://img.shields.io/github/v/release/qfzlm/py?label=Release)](https://github.com/qfzlm/py/releases)
+[![License](https://img.shields.io/badge/License-Not%20specified-lightgrey)](https://github.com/qfzlm/py)
+
 A lightweight Android app for fast, reliable earbud battery checks.
 
 > Personal daily-use tool: stable connection, quick refresh, minimal UI.
