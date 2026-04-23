@@ -55,6 +55,10 @@ class MainViewModel(
         refreshEnvironment()
         val state = _uiState.value
 
+        if (bleScannerManager.isRefreshInFlight()) {
+            recordLog("refresh_ignored reason=in_flight")
+            return
+        }
         if (!state.hasRequiredPermissions) {
             _uiState.update { it.copy(errorMessage = "请先授予蓝牙权限") }
             return
@@ -70,6 +74,10 @@ class MainViewModel(
             onState = ::updateBatteryState
         )
         if (!started) {
+            if (bleScannerManager.isRefreshInFlight()) {
+                recordLog("refresh_ignored reason=in_flight")
+                return
+            }
             _uiState.update { it.copy(errorMessage = "刷新失败，请确认耳机已开盖") }
         }
     }

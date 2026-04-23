@@ -1,5 +1,7 @@
 package com.example.twsbatterydemo.ble
 
+import android.Manifest
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
@@ -10,6 +12,9 @@ import android.bluetooth.BluetoothProfile
 import android.bluetooth.BluetoothStatusCodes
 import android.content.Context
 import android.os.Build
+import android.content.pm.PackageManager
+import androidx.annotation.RequiresApi
+import androidx.core.content.ContextCompat
 import com.example.twsbatterydemo.model.BatteryReadUiState
 import com.example.twsbatterydemo.protocol.OpenFeelBatteryParser
 import com.example.twsbatterydemo.protocol.SplitBatteryFrame
@@ -21,12 +26,29 @@ import java.util.UUID
 class OpenFeelGattSession(
     private val context: Context
 ) {
+    companion object {
+        private const val UI_SPLIT_WAIT_TIMEOUT_MS = 2_500L
+        private const val SPLIT_OBSERVE_WINDOW_MS = 8_000L
+    }
+
+    private data class RefreshCapabilities(
+        val canReadBattery: Boolean,
+        val canWriteSplit: Boolean,
+        val canNotifySplit: Boolean
+    )
+
+    private data class PendingWriteLog(
+        val sequence: Int,
+        val hex: String
+    )
 
     private data class SplitRequestStats(
         val requestId: Long,
         val windowEndAt: Long,
         val notifyCount: Int = 0,
         val splitFrameCount: Int = 0,
+        val writeRequestCount: Int = 0,
+        val writeRequestSuccessCount: Int = 0,
         val lastNotifyAt: Long = 0L,
         val lastFrame: SplitBatteryFrame? = null
     )
@@ -37,14 +59,13 @@ class OpenFeelGattSession(
         UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
     private val writeLogLock = Any()
     private val splitStatsLock = Any()
-    private val pendingWriteHexes = ArrayDeque<String>()
+    private val pendingWriteLogs = ArrayDeque<PendingWriteLog>()
 
     private var currentGatt: BluetoothGatt? = null
     private var currentState: BatteryReadUiState = BatteryReadUiState()
     private var logSink: ((String) -> Unit)? = null
     private var stateSink: ((BatteryReadUiState) -> Unit)? = null
 
-    private var activeSessionId: Long = 0L
     private var activeSplitRequestId: Long = 0L
 
     private var batteryCharacteristic: BluetoothGattCharacteristic? = null
@@ -53,74 +74,127 @@ class OpenFeelGattSession(
     private var splitNotifyReady: Boolean = false
     private var splitRequestScheduled: Boolean = false
     private var splitRequestStats: SplitRequestStats? = null
+    private var cachedCapabilities = RefreshCapabilities(
+        canReadBattery = false,
+        canWriteSplit = false,
+        canNotifySplit = false
+    )
+    private var servicesReady = false
+    private var activeRefreshToken: Long = 0L
+    private var activeRefreshStartAt: Long = 0L
+    @Volatile
+    private var uiRefreshCompleted: Boolean = false
+    @Volatile
+    private var splitTriggerStarted: Boolean = false
+    @Volatile
+    private var splitFirstFrameAtMs: Long? = null
+    @Volatile
+    private var refreshInFlight: Boolean = false
 
     fun startRefresh(
         macAddress: String,
         onLog: (String) -> Unit,
         onState: (BatteryReadUiState) -> Unit
     ): Boolean {
-        disconnect()
-
+        if (refreshInFlight) {
+            onLog("refresh_pipeline_skip reason=in_flight")
+            return false
+        }
         logSink = onLog
         stateSink = onState
-        activeSessionId += 1
-        batteryCharacteristic = null
-        splitWriteCharacteristic = null
-        splitNotifyCharacteristic = null
-        splitNotifyReady = false
+        refreshInFlight = true
+        activeRefreshToken += 1
+        activeRefreshStartAt = System.currentTimeMillis()
+        uiRefreshCompleted = false
+        splitTriggerStarted = false
+        splitFirstFrameAtMs = null
         splitRequestScheduled = false
         splitRequestStats = null
-        synchronized(writeLogLock) {
-            pendingWriteHexes.clear()
+        synchronized(writeLogLock) { pendingWriteLogs.clear() }
+
+        val normalizedMac = macAddress.uppercase(Locale.US)
+        val reusableReason = reusableReason(normalizedMac)
+        val reusable = reusableReason == null
+        emitLog("refresh_pipeline_start mac=$normalizedMac token=$activeRefreshToken")
+        emitLog("refresh_reuse_session=$reusable${if (reusableReason != null) " reason=$reusableReason" else ""}")
+        scheduleUiCompleteTimeout(activeRefreshToken)
+
+        if (reusable) {
+            val gatt = currentGatt ?: run {
+                refreshInFlight = false
+                return false
+            }
+            updateState(currentState.copy(isRefreshing = true, isConnected = true))
+            requestBatteryLevel(gatt)
+            splitRequestScheduled = cachedCapabilities.canWriteSplit && splitWriteCharacteristic != null
+            if (splitNotifyReady) {
+                requestSplitBatteryIfReady()
+            } else {
+                val notifyChar = splitNotifyCharacteristic
+                if (notifyChar != null && cachedCapabilities.canNotifySplit) {
+                    enableSplitNotify(gatt, notifyChar)
+                    scheduleNotifyReadyFallback(activeRefreshToken)
+                } else {
+                    emitLog(capabilityMissingSummary(cachedCapabilities))
+                    refreshInFlight = false
+                }
+            }
+            return true
         }
 
-        updateState(
-            currentState.copy(
-                isRefreshing = true,
-                isConnected = false
-            )
-        )
+        resetSessionForReconnect()
+        updateState(currentState.copy(isRefreshing = true, isConnected = false))
 
         val adapter = bluetoothManager.adapter ?: run {
             emitLog("connection_start failed reason=no_adapter")
             updateState(currentState.copy(isRefreshing = false, isConnected = false))
+            completeUiRefreshIfNeeded("no_adapter")
+            refreshInFlight = false
             return false
         }
 
-        val device = runCatching { adapter.getRemoteDevice(macAddress) }.getOrNull() ?: run {
-            emitLog("connection_start failed reason=invalid_mac mac=$macAddress")
+        val device = runCatching { adapter.getRemoteDevice(normalizedMac) }.getOrNull() ?: run {
+            emitLog("connection_start failed reason=invalid_mac mac=$normalizedMac")
             updateState(currentState.copy(isRefreshing = false, isConnected = false))
+            completeUiRefreshIfNeeded("invalid_mac")
+            refreshInFlight = false
             return false
         }
 
-        currentGatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
-        } else {
-            device.connectGatt(context, false, gattCallback)
+        currentGatt = connectGattSafely(device)
+        emitLog("connection_start mac=$normalizedMac name=${safeDeviceName(device)}")
+        val started = currentGatt != null
+        if (!started) {
+            emitLog("refresh_pipeline_summary result=failed reason=connectGatt_returned_null")
+            completeUiRefreshIfNeeded("connect_failed")
+            refreshInFlight = false
         }
-
-        emitLog("connection_start mac=$macAddress name=${device.name ?: "null"}")
-        return currentGatt != null
+        return started
     }
 
     fun disconnect() {
-        activeSessionId += 1
         activeSplitRequestId = 0L
         synchronized(splitStatsLock) {
             splitRequestStats = null
         }
         splitRequestScheduled = false
         splitNotifyReady = false
+        servicesReady = false
+        cachedCapabilities = RefreshCapabilities(
+            canReadBattery = false,
+            canWriteSplit = false,
+            canNotifySplit = false
+        )
         batteryCharacteristic = null
         splitWriteCharacteristic = null
         splitNotifyCharacteristic = null
         synchronized(writeLogLock) {
-            pendingWriteHexes.clear()
+            pendingWriteLogs.clear()
         }
 
         runCatching {
-            currentGatt?.disconnect()
-            currentGatt?.close()
+            currentGatt?.let { disconnectGattSafely(it) }
+            currentGatt?.let { closeGattSafely(it) }
         }
         currentGatt = null
 
@@ -132,7 +206,13 @@ class OpenFeelGattSession(
                 )
             )
         }
+        refreshInFlight = false
+        uiRefreshCompleted = false
+        splitTriggerStarted = false
+        splitFirstFrameAtMs = null
     }
+
+    fun isRefreshInFlight(): Boolean = refreshInFlight
 
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
@@ -145,7 +225,7 @@ class OpenFeelGattSession(
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     updateState(currentState.copy(isConnected = true))
-                    val started = gatt.discoverServices()
+                    val started = discoverServicesSafely(gatt)
                     emitLog("discover_services started=$started")
                 }
 
@@ -165,7 +245,10 @@ class OpenFeelGattSession(
                             isConnected = false
                         )
                     )
-                    runCatching { gatt.close() }
+                    completeUiRefreshIfNeeded("disconnected")
+                    refreshInFlight = false
+                    servicesReady = false
+                    closeGattSafely(gatt)
                 }
             }
         }
@@ -176,23 +259,23 @@ class OpenFeelGattSession(
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 emitLog("discover_services result=failed status=$status")
                 updateState(currentState.copy(isRefreshing = false, isConnected = true))
+                emitLog("refresh_pipeline_summary result=failed reason=discover_services_failed status=$status")
+                completeUiRefreshIfNeeded("discover_failed")
+                refreshInFlight = false
                 return
             }
 
-            var hasBatteryService = false
-            var hasPrivateService = false
+            servicesReady = true
+
             var canReadBattery = false
             var canWriteSplit = false
             var canNotifySplit = false
 
             gatt.services.forEach { service ->
                 val serviceUuid = service.uuid.toString().lowercase(Locale.US)
-                if (serviceUuid == OpenFeelBatteryParser.BATTERY_SERVICE_UUID) {
-                    hasBatteryService = true
-                }
-                if (OpenFeelBatteryParser.isPrivateService(serviceUuid)) {
-                    hasPrivateService = true
-                }
+                val isRelevantService = serviceUuid == OpenFeelBatteryParser.BATTERY_SERVICE_UUID ||
+                    OpenFeelBatteryParser.isPrivateService(serviceUuid)
+                if (!isRelevantService) return@forEach
 
                 service.characteristics.forEach { characteristic ->
                     val characteristicUuid = characteristic.uuid.toString().lowercase(Locale.US)
@@ -218,20 +301,29 @@ class OpenFeelGattSession(
                 }
             }
 
-            emitLog("gatt_services battery180f=$hasBatteryService privateFe=$hasPrivateService")
-            emitLog("gatt_chars batteryRead=$canReadBattery splitWrite=$canWriteSplit splitNotify=$canNotifySplit")
-
+            val capabilities = RefreshCapabilities(
+                canReadBattery = canReadBattery,
+                canWriteSplit = canWriteSplit,
+                canNotifySplit = canNotifySplit
+            )
+            cachedCapabilities = capabilities
             requestBatteryLevel(gatt)
+            splitRequestScheduled = capabilities.canWriteSplit && splitWriteCharacteristic != null
 
-            if (splitNotifyCharacteristic != null && canNotifySplit) {
+            if (splitNotifyCharacteristic != null && capabilities.canNotifySplit) {
                 enableSplitNotify(gatt, splitNotifyCharacteristic!!)
+                scheduleNotifyReadyFallback(activeRefreshToken)
             } else {
-                emitLog("split_request skipped reason=notify_characteristic_unavailable")
+                emitLog("f2_notify_enable_result requested=false reason=notify_characteristic_unavailable")
             }
 
-            splitRequestScheduled = splitWriteCharacteristic != null && canWriteSplit
-            updateState(currentState.copy(isRefreshing = false, isConnected = true))
-            requestSplitBatteryIfReady()
+            updateState(currentState.copy(isRefreshing = true, isConnected = true))
+            if (splitRequestScheduled && capabilities.canNotifySplit) {
+                requestSplitBatteryIfReady()
+            } else {
+                emitLog(capabilityMissingSummary(capabilities))
+                refreshInFlight = false
+            }
         }
 
         override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
@@ -240,7 +332,7 @@ class OpenFeelGattSession(
             val ownerUuid = descriptor.characteristic.uuid.toString().lowercase(Locale.US)
             if (OpenFeelBatteryParser.isPrivateNotifyCharacteristic(ownerUuid)) {
                 splitNotifyReady = status == BluetoothGatt.GATT_SUCCESS
-                emitLog("notify_enable uuid=$ownerUuid status=$status")
+                emitLog("f2_notify_enable_result requested=true status=$status uuid=$ownerUuid")
                 requestSplitBatteryIfReady()
             }
         }
@@ -284,12 +376,12 @@ class OpenFeelGattSession(
             status: Int
         ) {
             if (!isCurrentGatt(gatt)) return
-            val hex = synchronized(writeLogLock) {
-                if (pendingWriteHexes.isEmpty()) null else pendingWriteHexes.removeFirst()
+            val pending = synchronized(writeLogLock) {
+                if (pendingWriteLogs.isEmpty()) null else pendingWriteLogs.removeFirst()
             }
             emitLog(
-                "exp_f1_write_result ts=${System.currentTimeMillis()} uuid=${characteristic.uuid} " +
-                    "status=$status hex=${hex ?: "unknown"}"
+                "f1_write_${pending?.sequence ?: -1}_result status=$status " +
+                    "uuid=${characteristic.uuid} hex=${pending?.hex ?: "unknown"}"
             )
         }
     }
@@ -307,17 +399,18 @@ class OpenFeelGattSession(
             return
         }
 
-        val requested = gatt.readCharacteristic(characteristic)
-        emitLog("battery_read requested=$requested uuid=${characteristic.uuid}")
+        val queued = readCharacteristicSafely(gatt, characteristic)
+        emitLog("battery_read_start queued=$queued uuid=${characteristic.uuid}")
     }
 
     private fun enableSplitNotify(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
-        val localSet = gatt.setCharacteristicNotification(characteristic, true)
-        emitLog("notify_enable localSet=$localSet uuid=${characteristic.uuid}")
+        val localSet = setCharacteristicNotificationSafely(gatt, characteristic, true)
 
         val descriptor = characteristic.getDescriptor(clientConfigUuid)
         if (descriptor == null) {
-            emitLog("notify_enable skipped reason=cccd_not_found uuid=${characteristic.uuid}")
+            splitNotifyReady = localSet
+            emitLog("f2_notify_enable_result requested=false reason=cccd_not_found fallbackReady=$splitNotifyReady uuid=${characteristic.uuid}")
+            requestSplitBatteryIfReady()
             return
         }
 
@@ -328,13 +421,19 @@ class OpenFeelGattSession(
         }
 
         val requested = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            gatt.writeDescriptor(descriptor, enableValue) == BluetoothStatusCodes.SUCCESS
+            writeDescriptorSafely(gatt, descriptor, enableValue)
         } else {
             descriptor.value = enableValue
-            gatt.writeDescriptor(descriptor)
+            writeDescriptorSafely(gatt, descriptor)
         }
 
-        emitLog("notify_enable requested=$requested uuid=${characteristic.uuid}")
+        if (!requested && localSet) {
+            splitNotifyReady = true
+            emitLog("f2_notify_enable_result requested=false reason=descriptor_write_not_requested fallbackReady=true uuid=${characteristic.uuid}")
+            requestSplitBatteryIfReady()
+        } else if (!requested) {
+            emitLog("f2_notify_enable_result requested=$requested uuid=${characteristic.uuid}")
+        }
     }
 
     private fun requestSplitBatteryIfReady() {
@@ -343,24 +442,25 @@ class OpenFeelGattSession(
         if (!splitRequestScheduled || !splitNotifyReady) return
 
         splitRequestScheduled = false
+        splitTriggerStarted = true
         activeSplitRequestId += 1
         val requestId = activeSplitRequestId
-        val windowEndAt = System.currentTimeMillis() + 15_500L
+        val windowEndAt = System.currentTimeMillis() + SPLIT_OBSERVE_WINDOW_MS
         synchronized(splitStatsLock) {
             splitRequestStats = SplitRequestStats(requestId = requestId, windowEndAt = windowEndAt)
         }
+        emitLog("split_trigger_start requestId=$requestId windowMs=$SPLIT_OBSERVE_WINDOW_MS")
 
         Thread {
             val commands = OpenFeelBatteryParser.splitBatteryCommands()
             commands.forEachIndexed { index, command ->
                 if (requestId != activeSplitRequestId || !isCurrentGatt(gatt)) return@Thread
-                writeSplitCommand(gatt, characteristic, command)
+                writeSplitCommand(gatt, characteristic, command, index + 1, requestId)
                 if (index == 0) {
                     Thread.sleep(180L)
                 }
             }
 
-            emitLog("split_request windowEndAt=$windowEndAt")
             val delay = (windowEndAt - System.currentTimeMillis()).coerceAtLeast(0L)
             Thread.sleep(delay)
 
@@ -378,25 +478,35 @@ class OpenFeelGattSession(
     private fun writeSplitCommand(
         gatt: BluetoothGatt,
         characteristic: BluetoothGattCharacteristic,
-        command: ByteArray
+        command: ByteArray,
+        sequence: Int,
+        requestId: Long
     ) {
         val hex = command.toHexString("")
         synchronized(writeLogLock) {
-            pendingWriteHexes.addLast(hex)
+            pendingWriteLogs.addLast(PendingWriteLog(sequence = sequence, hex = hex))
         }
 
-        val requested = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        val queued = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val writeType = preferredWriteType(characteristic)
-            gatt.writeCharacteristic(characteristic, command, writeType) == BluetoothStatusCodes.SUCCESS
+            writeCharacteristicSafely(gatt, characteristic, command, writeType)
         } else {
             characteristic.value = command
             characteristic.writeType = preferredWriteType(characteristic)
-            gatt.writeCharacteristic(characteristic)
+            writeCharacteristicSafely(gatt, characteristic)
+        }
+        synchronized(splitStatsLock) {
+            val stats = splitRequestStats
+            if (stats != null && stats.requestId == requestId) {
+                splitRequestStats = stats.copy(
+                    writeRequestCount = stats.writeRequestCount + 1,
+                    writeRequestSuccessCount = stats.writeRequestSuccessCount + if (queued) 1 else 0
+                )
+            }
         }
 
         emitLog(
-            "exp_f1_write ts=${System.currentTimeMillis()} uuid=${characteristic.uuid} " +
-                "requested=$requested hex=$hex"
+            "f1_write_${sequence}_queue queued=$queued uuid=${characteristic.uuid} hex=$hex"
         )
     }
 
@@ -432,14 +542,26 @@ class OpenFeelGattSession(
         if (!OpenFeelBatteryParser.isPrivateNotifyCharacteristic(characteristicUuid)) return
 
         val rawHex = value.toHexString()
-        emitLog("f2_notify ts=${System.currentTimeMillis()} hex=$rawHex")
+        emitLog("f2_raw_notify ts=${System.currentTimeMillis()} hex=$rawHex")
 
         val parsed = OpenFeelBatteryParser.parseSplitBatteryFrame(value)
         if (parsed != null) {
             val updatedAt = System.currentTimeMillis()
+            val statsAtFrame = synchronized(splitStatsLock) { splitRequestStats }
+            val receiveSource = when {
+                statsAtFrame == null -> "passive"
+                statsAtFrame.writeRequestSuccessCount > 0 -> "active_trigger"
+                statsAtFrame.writeRequestCount > 0 -> "passive_after_queue_failed"
+                else -> "passive"
+            }
+            if (splitFirstFrameAtMs == null) {
+                splitFirstFrameAtMs = (updatedAt - activeRefreshStartAt).coerceAtLeast(0L)
+                completeUiRefreshIfNeeded("split_frame")
+            }
             emitLog(
-                "split_battery seq=${toHexByte(parsed.sequence)} " +
-                    "left=${parsed.leftBattery} right=${parsed.rightBattery} case=${parsed.caseBattery}"
+                "split_040c_parsed seq=${toHexByte(parsed.sequence)} " +
+                    "left=${parsed.leftBattery} right=${parsed.rightBattery} case=${parsed.caseBattery} " +
+                    "source=$receiveSource"
             )
             updateState(
                 currentState.copy(
@@ -470,13 +592,82 @@ class OpenFeelGattSession(
         if (stats.requestId != requestId) return
 
         emitLog(
-            "split_summary hasNotify=${stats.notifyCount > 0} has040c=${stats.splitFrameCount > 0} " +
-                "notifyCount=${stats.notifyCount} frameCount=${stats.splitFrameCount} " +
+            "refresh_pipeline_summary result=completed splitTriggered=$splitTriggerStarted hasNotify=${stats.notifyCount > 0} " +
+                "has040c=${stats.splitFrameCount > 0} notifyCount=${stats.notifyCount} " +
+                "frameCount=${stats.splitFrameCount} writeCount=${stats.writeRequestCount} " +
+                "writeSuccessCount=${stats.writeRequestSuccessCount} " +
+                "firstFrameAt=${splitFirstFrameAtMs ?: -1}ms " +
                 "last=${formatLastFrame(stats.lastFrame)}"
         )
         synchronized(splitStatsLock) {
             splitRequestStats = null
         }
+        completeUiRefreshIfNeeded("window_complete")
+        refreshInFlight = false
+        splitTriggerStarted = false
+        splitFirstFrameAtMs = null
+    }
+
+    private fun scheduleNotifyReadyFallback(refreshToken: Long) {
+        Thread {
+            Thread.sleep(1_200L)
+            if (refreshToken != activeRefreshToken) return@Thread
+            if (!refreshInFlight || !splitRequestScheduled || splitNotifyReady) return@Thread
+            emitLog("f2_notify_enable_result requested=timeout_fallback fallbackReady=true token=$refreshToken")
+            splitNotifyReady = true
+            requestSplitBatteryIfReady()
+        }.start()
+    }
+
+    private fun scheduleUiCompleteTimeout(refreshToken: Long) {
+        Thread {
+            Thread.sleep(UI_SPLIT_WAIT_TIMEOUT_MS)
+            if (refreshToken != activeRefreshToken) return@Thread
+            completeUiRefreshIfNeeded("timeout")
+        }.start()
+    }
+
+    @Synchronized
+    private fun completeUiRefreshIfNeeded(@Suppress("UNUSED_PARAMETER") reason: String) {
+        if (uiRefreshCompleted) return
+        uiRefreshCompleted = true
+        updateState(currentState.copy(isRefreshing = false))
+    }
+
+    private fun reusableReason(targetMac: String): String? {
+        val gatt = currentGatt ?: return "no_gatt"
+        val addressMatch = gatt.device.address.equals(targetMac, ignoreCase = true)
+        if (!addressMatch) return "mac_changed"
+        if (!servicesReady) return "services_not_ready"
+
+        val connectedByProfile = isGattConnected(gatt)
+        if (!connectedByProfile) return "gatt_not_connected"
+
+        if (!cachedCapabilities.canReadBattery) return "battery_read_unavailable"
+        if (!cachedCapabilities.canWriteSplit) return "split_write_unavailable"
+        if (!cachedCapabilities.canNotifySplit) return "split_notify_unavailable"
+        if (batteryCharacteristic == null) return "battery_char_missing"
+        if (splitWriteCharacteristic == null) return "split_write_char_missing"
+        if (splitNotifyCharacteristic == null) return "split_notify_char_missing"
+        return null
+    }
+
+    private fun resetSessionForReconnect() {
+        runCatching {
+            currentGatt?.let { disconnectGattSafely(it) }
+            currentGatt?.let { closeGattSafely(it) }
+        }
+        currentGatt = null
+        splitNotifyReady = false
+        servicesReady = false
+        cachedCapabilities = RefreshCapabilities(
+            canReadBattery = false,
+            canWriteSplit = false,
+            canNotifySplit = false
+        )
+        batteryCharacteristic = null
+        splitWriteCharacteristic = null
+        splitNotifyCharacteristic = null
     }
 
     private fun preferredWriteType(characteristic: BluetoothGattCharacteristic): Int {
@@ -510,7 +701,127 @@ class OpenFeelGattSession(
         return "L=${frame.leftBattery} R=${frame.rightBattery} C=${frame.caseBattery}"
     }
 
+    private fun capabilityMissingSummary(capabilities: RefreshCapabilities): String {
+        return "refresh_pipeline_summary result=completed splitTriggered=false reason=capability_missing " +
+            "batteryRead=${capabilities.canReadBattery} " +
+            "splitWrite=${capabilities.canWriteSplit} " +
+            "splitNotify=${capabilities.canNotifySplit}"
+    }
+
     private fun toHexByte(value: Int): String {
         return value.toString(16).uppercase(Locale.US).padStart(2, '0')
+    }
+
+    private fun hasConnectPermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) ==
+                PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun connectGattSafely(device: BluetoothDevice): BluetoothGatt? {
+        if (!hasConnectPermission()) return null
+        return runCatching {
+            device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+        }.getOrNull()
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun safeDeviceName(device: BluetoothDevice): String {
+        if (!hasConnectPermission()) return "null"
+        return runCatching { device.name ?: "null" }.getOrDefault("null")
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun disconnectGattSafely(gatt: BluetoothGatt) {
+        if (!hasConnectPermission()) return
+        runCatching { gatt.disconnect() }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun closeGattSafely(gatt: BluetoothGatt) {
+        if (!hasConnectPermission()) return
+        runCatching { gatt.close() }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun discoverServicesSafely(gatt: BluetoothGatt): Boolean {
+        if (!hasConnectPermission()) return false
+        return runCatching { gatt.discoverServices() }.getOrDefault(false)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun readCharacteristicSafely(
+        gatt: BluetoothGatt,
+        characteristic: BluetoothGattCharacteristic
+    ): Boolean {
+        if (!hasConnectPermission()) return false
+        return runCatching { gatt.readCharacteristic(characteristic) }.getOrDefault(false)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun setCharacteristicNotificationSafely(
+        gatt: BluetoothGatt,
+        characteristic: BluetoothGattCharacteristic,
+        enabled: Boolean
+    ): Boolean {
+        if (!hasConnectPermission()) return false
+        return runCatching { gatt.setCharacteristicNotification(characteristic, enabled) }.getOrDefault(false)
+    }
+
+    @SuppressLint("MissingPermission")
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    private fun writeDescriptorSafely(
+        gatt: BluetoothGatt,
+        descriptor: BluetoothGattDescriptor,
+        value: ByteArray
+    ): Boolean {
+        if (!hasConnectPermission()) return false
+        return runCatching {
+            gatt.writeDescriptor(descriptor, value) == BluetoothStatusCodes.SUCCESS
+        }.getOrDefault(false)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun writeDescriptorSafely(
+        gatt: BluetoothGatt,
+        descriptor: BluetoothGattDescriptor
+    ): Boolean {
+        if (!hasConnectPermission()) return false
+        return runCatching { gatt.writeDescriptor(descriptor) }.getOrDefault(false)
+    }
+
+    @SuppressLint("MissingPermission")
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    private fun writeCharacteristicSafely(
+        gatt: BluetoothGatt,
+        characteristic: BluetoothGattCharacteristic,
+        value: ByteArray,
+        writeType: Int
+    ): Boolean {
+        if (!hasConnectPermission()) return false
+        return runCatching {
+            gatt.writeCharacteristic(characteristic, value, writeType) == BluetoothStatusCodes.SUCCESS
+        }.getOrDefault(false)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun writeCharacteristicSafely(
+        gatt: BluetoothGatt,
+        characteristic: BluetoothGattCharacteristic
+    ): Boolean {
+        if (!hasConnectPermission()) return false
+        return runCatching { gatt.writeCharacteristic(characteristic) }.getOrDefault(false)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun isGattConnected(gatt: BluetoothGatt): Boolean {
+        if (!hasConnectPermission()) return false
+        return runCatching {
+            bluetoothManager.getConnectionState(gatt.device, BluetoothProfile.GATT) == BluetoothProfile.STATE_CONNECTED
+        }.getOrDefault(false)
     }
 }

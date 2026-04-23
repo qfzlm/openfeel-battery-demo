@@ -1,6 +1,7 @@
 package com.example.twsbatterydemo.ble
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.BluetoothLeScanner
@@ -17,6 +18,10 @@ import com.example.twsbatterydemo.util.AppLogger
 class BleScannerManager(
     private val context: Context
 ) {
+
+    companion object {
+        private const val TARGET_SCAN_LOG_INTERVAL_MS = 30_000L
+    }
 
     private val bluetoothManager: BluetoothManager =
         context.getSystemService(BluetoothManager::class.java)
@@ -91,15 +96,18 @@ class BleScannerManager(
         }
 
         scanCallback = callback
-        scanner.startScan(emptyList(), settings, callback)
-        onDebugLog?.invoke("scan_started mode=no_filter")
+        if (!startScanSafely(scanner, settings, callback)) {
+            onError("启动扫描失败")
+            return false
+        }
+        onDebugLog?.invoke("scan_start mode=no_filter")
         return true
     }
 
     fun stopScan() {
         val callback = scanCallback ?: return
         if (hasRequiredPermissions()) {
-            bleScanner?.stopScan(callback)
+            bleScanner?.let { stopScanSafely(it, callback) }
         }
         scanCallback = null
     }
@@ -127,6 +135,8 @@ class BleScannerManager(
         gattSession.disconnect()
     }
 
+    fun isRefreshInFlight(): Boolean = gattSession.isRefreshInFlight()
+
     private fun emitTargetScanHit(
         result: ScanResult,
         onDebugLog: ((String) -> Unit)?
@@ -134,12 +144,43 @@ class BleScannerManager(
         val hit = targetMatcher.match(result) ?: return
         val now = System.currentTimeMillis()
         val lastLoggedAt = lastScanLogAtByMac[hit.macAddress] ?: 0L
-        if (now - lastLoggedAt < 5_000L) return
+        if (now - lastLoggedAt < TARGET_SCAN_LOG_INTERVAL_MS) return
 
         lastScanLogAtByMac[hit.macAddress] = now
         onDebugLog?.invoke(
             "scan_target_hit mac=${hit.macAddress} name=${hit.deviceName ?: "null"} " +
                 "rssi=${hit.rssi} reason=${hit.reason}"
         )
+    }
+
+    private fun hasScanPermission(): Boolean {
+        val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            Manifest.permission.BLUETOOTH_SCAN
+        } else {
+            Manifest.permission.ACCESS_FINE_LOCATION
+        }
+        return ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun startScanSafely(
+        scanner: BluetoothLeScanner,
+        settings: ScanSettings,
+        callback: ScanCallback
+    ): Boolean {
+        if (!hasScanPermission()) return false
+        return runCatching {
+            scanner.startScan(emptyList(), settings, callback)
+            true
+        }.getOrDefault(false)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun stopScanSafely(
+        scanner: BluetoothLeScanner,
+        callback: ScanCallback
+    ) {
+        if (!hasScanPermission()) return
+        runCatching { scanner.stopScan(callback) }
     }
 }

@@ -22,7 +22,7 @@ class TargetDeviceMatcher {
 
     fun match(result: ScanResult): TargetDeviceHit? {
         val macAddress = result.device?.address?.uppercase(Locale.US) ?: return null
-        val deviceName = result.device?.name
+        val deviceName = result.scanRecord?.deviceName
         val hasTargetManufacturer = hasManufacturerId(result, TARGET_MANUFACTURER_ID)
         val hasTargetPrefix = macAddress.startsWith(TARGET_MAC_PREFIX)
 

@@ -20,6 +20,15 @@ object DownloadLogExporter {
         displayName: String,
         content: String
     ): LogExportResult {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            return LogExportResult(
+                displayName = displayName,
+                contentUri = null,
+                sizeBytes = null,
+                message = "导出失败：仅支持 Android 10 及以上"
+            )
+        }
+
         val bytes = content.toByteArray(Charsets.UTF_8)
         val resolver = context.contentResolver
 
@@ -27,10 +36,8 @@ object DownloadLogExporter {
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, displayName)
                 put(MediaStore.Downloads.MIME_TYPE, "text/plain")
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-                    put(MediaStore.Downloads.IS_PENDING, 1)
-                }
+                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                put(MediaStore.Downloads.IS_PENDING, 1)
             }
 
             val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
@@ -38,7 +45,7 @@ object DownloadLogExporter {
                     displayName = displayName,
                     contentUri = null,
                     sizeBytes = null,
-                    message = "导出失败：无法创建下载记录"
+                    message = "导出失败：无法创建下载文件"
                 )
 
             resolver.openOutputStream(uri)?.use { outputStream ->
@@ -51,12 +58,10 @@ object DownloadLogExporter {
                 message = "导出失败：无法打开输出流"
             )
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val completedValues = ContentValues().apply {
-                    put(MediaStore.Downloads.IS_PENDING, 0)
-                }
-                resolver.update(uri, completedValues, null, null)
+            val completedValues = ContentValues().apply {
+                put(MediaStore.Downloads.IS_PENDING, 0)
             }
+            resolver.update(uri, completedValues, null, null)
 
             LogExportResult(
                 displayName = displayName,

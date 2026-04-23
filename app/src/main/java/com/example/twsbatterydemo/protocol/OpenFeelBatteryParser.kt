@@ -5,13 +5,9 @@ import java.util.Locale
 
 data class SplitBatteryFrame(
     val sequence: Int,
-    val leftRaw: Int,
-    val rightRaw: Int,
-    val caseRaw: Int,
     val leftBattery: Int,
     val rightBattery: Int,
-    val caseBattery: Int,
-    val tail: Int
+    val caseBattery: Int
 )
 
 object OpenFeelBatteryParser {
@@ -57,17 +53,11 @@ object OpenFeelBatteryParser {
         val leftRaw = value[4].toInt() and 0xFF
         val rightRaw = value[5].toInt() and 0xFF
         val caseRaw = value[6].toInt() and 0xFF
-        val tail = value[7].toInt() and 0xFF
-
         return SplitBatteryFrame(
             sequence = sequence,
-            leftRaw = leftRaw,
-            rightRaw = rightRaw,
-            caseRaw = caseRaw,
             leftBattery = leftRaw and 0x7F,
             rightBattery = rightRaw and 0x7F,
-            caseBattery = caseRaw and 0x7F,
-            tail = tail
+            caseBattery = caseRaw and 0x7F
         )
     }
 
