@@ -1,8 +1,8 @@
 # 弱水时砂 OpenFeel 电量（Android）
 
-[![Android CI](https://img.shields.io/github/actions/workflow/status/qfzlm/openfeel-battery-demo/android-ci.yml?branch=main&label=Android%20CI)](https://github.com/qfzlm/openfeel-battery-demo/actions/workflows/android-ci.yml)
-[![Release](https://img.shields.io/github/v/release/qfzlm/openfeel-battery-demo?label=Release)](https://github.com/qfzlm/openfeel-battery-demo/releases)
-[![License](https://img.shields.io/badge/License-Not%20specified-lightgrey)](https://github.com/qfzlm/openfeel-battery-demo)
+[![Android CI](https://img.shields.io/badge/Android%20CI-enabled-2ea44f)](https://github.com/qfzlm/openfeel-battery-demo/actions/workflows/android-ci.yml)
+[![Release](https://img.shields.io/badge/Release-v0.2.0-2ea44f)](https://github.com/qfzlm/openfeel-battery-demo/releases/tag/v0.2.0)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
 一个针对弱水时砂 OpenFeel 系列耳机的 Android 电量读取工具。
 
