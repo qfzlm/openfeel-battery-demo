@@ -1,29 +1,20 @@
-# 耳机电量（Android）
+# 弱水时砂 OpenFeel 电量（Android）
 
-[![Android CI](https://img.shields.io/github/actions/workflow/status/qfzlm/earbud-battery-demo/android-ci.yml?branch=main&label=Android%20CI)](https://github.com/qfzlm/earbud-battery-demo/actions/workflows/android-ci.yml)
-[![Release](https://img.shields.io/github/v/release/qfzlm/earbud-battery-demo?label=Release)](https://github.com/qfzlm/earbud-battery-demo/releases)
-[![License](https://img.shields.io/badge/License-Not%20specified-lightgrey)](https://github.com/qfzlm/earbud-battery-demo)
+[![Android CI](https://img.shields.io/github/actions/workflow/status/qfzlm/openfeel-battery-demo/android-ci.yml?branch=main&label=Android%20CI)](https://github.com/qfzlm/openfeel-battery-demo/actions/workflows/android-ci.yml)
+[![Release](https://img.shields.io/github/v/release/qfzlm/openfeel-battery-demo?label=Release)](https://github.com/qfzlm/openfeel-battery-demo/releases)
+[![License](https://img.shields.io/badge/License-Not%20specified-lightgrey)](https://github.com/qfzlm/openfeel-battery-demo)
 
-一个轻量、直接、稳定的 Android 耳机电量工具。
+一个针对弱水时砂 OpenFeel 系列耳机的 Android 电量读取工具。
 
 > 自用为主：连接稳定、刷新快、界面简洁。
 
 ## 快速开始
 
-1. 安装 JDK 17 与 Android SDK（`android-35`）。
-2. 在项目根目录执行：
+1. 打开 Release 页面下载最新 APK：  
+   [https://github.com/qfzlm/openfeel-battery-demo/releases](https://github.com/qfzlm/openfeel-battery-demo/releases)
+2. 在手机上安装 APK 并授予蓝牙权限。
 
-```powershell
-gradlew.bat :app:assembleDebug --no-daemon
-```
-
-3. 安装生成的 APK：
-
-```text
-app/build/outputs/apk/debug/app-debug.apk
-```
-
-更多开发流程见 `docs/DEV_QUICKSTART.md`。
+如果你是开发者，需要自行构建，请看下方“构建”章节与 `docs/DEV_QUICKSTART.md`。
 
 ## 功能
 
@@ -39,10 +30,10 @@ app/build/outputs/apk/debug/app-debug.apk
 
 ## 当前支持范围
 
-- 主目标设备：`41:42:D3:16:6F:68`
-- 识别特征：
+- 目标：弱水时砂 OpenFeel（当前按已实测机型路径实现）
+- 识别特征（实现细节）：
   - Manufacturer ID `0x0A0B`
-  - MAC 前缀 `41:42`
+  - 设备 MAC 前缀 `41:42`
 
 本项目刻意保持在“已验证的个人设备路径”内，不做通用多设备平台。
 
