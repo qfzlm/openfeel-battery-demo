@@ -61,6 +61,10 @@ APK output:
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
+Developer quickstart:
+
+- `docs/DEV_QUICKSTART.md`
+
 ## Runtime Permissions
 
 - Android 12+: `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT`
