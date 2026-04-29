@@ -1,12 +1,29 @@
 # 耳机电量（Android）
 
-[![Android CI](https://img.shields.io/github/actions/workflow/status/qfzlm/py/android-ci.yml?branch=main&label=Android%20CI)](https://github.com/qfzlm/py/actions/workflows/android-ci.yml)
-[![Release](https://img.shields.io/github/v/release/qfzlm/py?label=Release)](https://github.com/qfzlm/py/releases)
-[![License](https://img.shields.io/badge/License-Not%20specified-lightgrey)](https://github.com/qfzlm/py)
+[![Android CI](https://img.shields.io/github/actions/workflow/status/qfzlm/earbud-battery-demo/android-ci.yml?branch=main&label=Android%20CI)](https://github.com/qfzlm/earbud-battery-demo/actions/workflows/android-ci.yml)
+[![Release](https://img.shields.io/github/v/release/qfzlm/earbud-battery-demo?label=Release)](https://github.com/qfzlm/earbud-battery-demo/releases)
+[![License](https://img.shields.io/badge/License-Not%20specified-lightgrey)](https://github.com/qfzlm/earbud-battery-demo)
 
 一个轻量、直接、稳定的 Android 耳机电量工具。
 
 > 自用为主：连接稳定、刷新快、界面简洁。
+
+## 快速开始
+
+1. 安装 JDK 17 与 Android SDK（`android-35`）。
+2. 在项目根目录执行：
+
+```powershell
+gradlew.bat :app:assembleDebug --no-daemon
+```
+
+3. 安装生成的 APK：
+
+```text
+app/build/outputs/apk/debug/app-debug.apk
+```
+
+更多开发流程见 `docs/DEV_QUICKSTART.md`。
 
 ## 功能
 
@@ -52,7 +69,7 @@
 ### Windows 构建命令
 
 ```powershell
-gradlew.bat -p E:\py\erji\TwsBatteryDemo :app:assembleDebug --no-daemon
+gradlew.bat :app:assembleDebug --no-daemon
 ```
 
 APK 输出路径：
