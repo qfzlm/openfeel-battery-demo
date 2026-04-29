@@ -1,93 +1,93 @@
-# Earbud Battery (Android)
+# 耳机电量（Android）
 
 [![Android CI](https://img.shields.io/github/actions/workflow/status/qfzlm/py/android-ci.yml?branch=main&label=Android%20CI)](https://github.com/qfzlm/py/actions/workflows/android-ci.yml)
 [![Release](https://img.shields.io/github/v/release/qfzlm/py?label=Release)](https://github.com/qfzlm/py/releases)
 [![License](https://img.shields.io/badge/License-Not%20specified-lightgrey)](https://github.com/qfzlm/py)
 
-A lightweight Android app for fast, reliable earbud battery checks.
+一个轻量、直接、稳定的 Android 耳机电量工具。
 
-> Personal daily-use tool: stable connection, quick refresh, minimal UI.
+> 自用为主：连接稳定、刷新快、界面简洁。
 
-## Features
+## 功能
 
-- One-tap refresh for both total battery and split battery.
-- Stable total battery fallback via standard `180F / 2A19`.
-- Split battery pipeline from validated private frame:
+- 一键刷新：同时更新总电量与分电量。
+- 总电量稳定兜底：标准 `180F / 2A19`。
+- 分电量来自已验证私有帧：
   - `DD ?? 04 0C XX YY ZZ AA`
-  - Left: `XX & 0x7F`
-  - Right: `YY & 0x7F`
-  - Case: `ZZ & 0x7F`
-- Keeps last successful values after temporary disconnects.
-- Export logs to `Download` (MediaStore).
+  - 左耳：`XX & 0x7F`
+  - 右耳：`YY & 0x7F`
+  - 充电仓：`ZZ & 0x7F`
+- 临时断开后保留最后一次成功值。
+- 支持导出日志到 `Download`（MediaStore）。
 
-## Supported Device Scope (Current)
+## 当前支持范围
 
-- Primary target: `41:42:D3:16:6F:68`
-- Matching signals:
+- 主目标设备：`41:42:D3:16:6F:68`
+- 识别特征：
   - Manufacturer ID `0x0A0B`
-  - MAC prefix `41:42`
+  - MAC 前缀 `41:42`
 
-This project is intentionally scoped for a validated personal target path, not generic multi-device support.
+本项目刻意保持在“已验证的个人设备路径”内，不做通用多设备平台。
 
-## UI (Production)
+## 正式版首页
 
-Home screen keeps only essential info:
+首页只保留必要信息：
 
-- Total battery
-- Last update time
-- Connection status
-- Left / Right / Case battery
-- Refresh button
-- Export logs button
+- 总电量
+- 最近更新时间
+- 当前连接状态
+- 左耳 / 右耳 / 充电仓电量
+- 刷新电量按钮
+- 导出日志按钮
 
-No debug panels, no candidate list, no GATT raw detail shown to users.
+不展示调试面板、候选列表、GATT 原始明细。
 
-## Build
+## 构建
 
-### Requirements
+### 环境要求
 
 - JDK 17
-- Android SDK (`android-35` + matching build-tools)
+- Android SDK（`android-35` 与对应 build-tools）
 
-### Build command (Windows)
+### Windows 构建命令
 
 ```powershell
 gradlew.bat -p E:\py\erji\TwsBatteryDemo :app:assembleDebug --no-daemon
 ```
 
-APK output:
+APK 输出路径：
 
 ```text
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Developer quickstart:
+开发者快速开始：
 
 - `docs/DEV_QUICKSTART.md`
 
-## Runtime Permissions
+## 运行时权限
 
-- Android 12+: `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT`
-- Android 11 and below: location permission is required for BLE scan
+- Android 12+：`BLUETOOTH_SCAN`、`BLUETOOTH_CONNECT`
+- Android 11 及以下：BLE 扫描需要定位权限
 
-## Cache Rules
+## 缓存策略
 
-- Total and split battery cache keep the latest successful values.
-- Failed refresh does not clear previous valid values.
-- Temporary disconnect does not clear previous valid values.
-- `N/A` / `--` appears only when there has never been a successful read.
+- 总电量和分电量均保留最近一次成功值。
+- 本次刷新失败不会清空旧值。
+- 临时断开不会清空旧值。
+- 仅在从未成功读取过时显示 `N/A` / `--`。
 
-## Known Limits
+## 已知限制
 
-- Single target path by design (no multi-device session management).
-- Charging-state semantics are intentionally not exposed as formal UI yet.
-- No unknown private write commands are sent.
+- 设计上是单目标路径（不做多设备会话管理）。
+- 充电状态语义暂不作为正式 UI 展示。
+- 不发送未知私有写命令。
 
-## Changelog / Releases
+## 版本记录
 
-- See GitHub Releases and `RELEASE_NOTES_v0.2.0.md`.
+- 见 GitHub Releases 与 `RELEASE_NOTES_v0.2.0.md`。
 
-## Disclaimer
+## 说明
 
-This is a personal utility project based on practical validation and reverse-engineering clues.
-Compatibility is not guaranteed for all firmware or hardware variants.
+这是基于实测与逆向线索整理出的个人工具项目。  
+不同固件与硬件版本不保证完全兼容。
