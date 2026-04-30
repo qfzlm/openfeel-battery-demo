@@ -701,6 +701,24 @@ class OpenFeelGattSession(
                 "firstFrameAt=${splitFirstFrameAtMs ?: -1}ms " +
                 "last=${formatLastFrame(stats.lastFrame)} requestId=$requestId refreshId=${currentRefreshId()}"
         )
+        val shadowObserving = pipelineState as? RefreshPipelineState.SplitObserving
+        val shadowTriggered = shadowObserving != null
+        val shadowFirstFrame = shadowObserving?.firstFrameAtMs ?: -1L
+        val oldFirstFrame = splitFirstFrameAtMs ?: -1L
+        if (shadowTriggered != splitTriggerStarted || shadowFirstFrame != oldFirstFrame) {
+            emitLog(
+                "pipeline_state_shadow MISMATCH " +
+                    "splitTriggeredShadow=$shadowTriggered splitTriggeredOld=$splitTriggerStarted " +
+                    "firstFrameAtShadow=${shadowFirstFrame}ms firstFrameAtOld=${oldFirstFrame}ms " +
+                    "requestId=$requestId refreshId=${currentRefreshId()}"
+            )
+        } else {
+            emitLog(
+                "pipeline_state_shadow MATCH " +
+                    "splitTriggered=$shadowTriggered firstFrameAt=${shadowFirstFrame}ms " +
+                    "requestId=$requestId refreshId=${currentRefreshId()}"
+            )
+        }
         synchronized(splitStatsLock) {
             splitRequestStats = null
         }
