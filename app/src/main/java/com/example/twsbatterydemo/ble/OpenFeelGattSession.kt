@@ -104,6 +104,7 @@ class OpenFeelGattSession(
     private var uiTimeoutJob: Job? = null
     private var notifyFallbackJob: Job? = null
     private var splitRequestJob: Job? = null
+    private var batteryReadGateJob: Job? = null
 
     private var activeSplitRequestId: Long = 0L
 
@@ -129,6 +130,10 @@ class OpenFeelGattSession(
     private var splitFirstFrameAtMs: Long? = null
     @Volatile
     private var refreshInFlight: Boolean = false
+    @Volatile
+    private var batteryReadGateOpen: Boolean = false
+    @Volatile
+    private var splitPendingBatteryGate: Boolean = false
 
     fun startRefresh(
         macAddress: String,
@@ -148,6 +153,8 @@ class OpenFeelGattSession(
         splitTriggerStarted = false
         splitFirstFrameAtMs = null
         splitRequestScheduled = false
+        splitPendingBatteryGate = false
+        batteryReadGateOpen = false
         splitRequestStats = null
         synchronized(writeLogLock) { pendingWriteLogs.clear() }
         uiState = RefreshUiState(isRefreshing = true)
@@ -236,6 +243,8 @@ class OpenFeelGattSession(
             splitRequestStats = null
         }
         splitRequestScheduled = false
+        splitPendingBatteryGate = false
+        batteryReadGateOpen = false
         splitNotifyReady = false
         servicesReady = false
         cachedCapabilities = RefreshCapabilities(
@@ -268,6 +277,8 @@ class OpenFeelGattSession(
         uiRefreshCompleted = false
         splitTriggerStarted = false
         splitFirstFrameAtMs = null
+        splitPendingBatteryGate = false
+        batteryReadGateOpen = false
         transitionTo(RefreshPipelineState.Idle)
     }
 
@@ -469,17 +480,24 @@ class OpenFeelGattSession(
         val characteristic = batteryCharacteristic
         if (characteristic == null) {
             emitLog("battery_read requested=false reason=characteristic_not_found refreshId=${currentRefreshId()}")
+            openBatteryReadGate("no_characteristic")
             return
         }
 
         val canRead = hasProperty(characteristic, BluetoothGattCharacteristic.PROPERTY_READ)
         if (!canRead) {
             emitLog("battery_read requested=false reason=missing_read_property refreshId=${currentRefreshId()}")
+            openBatteryReadGate("missing_read_property")
             return
         }
 
         val queued = readCharacteristicSafely(gatt, characteristic)
         emitLog("battery_read_start queued=$queued uuid=${characteristic.uuid} refreshId=${currentRefreshId()}")
+        if (queued) {
+            scheduleBatteryReadGateTimeout(activeRefreshToken)
+        } else {
+            openBatteryReadGate("read_not_queued")
+        }
     }
 
     private fun enableSplitNotify(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
@@ -526,8 +544,14 @@ class OpenFeelGattSession(
         val gatt = currentGatt ?: return
         val characteristic = splitWriteCharacteristic ?: return
         if (!splitRequestScheduled || !splitNotifyReady) return
+        if (!batteryReadGateOpen) {
+            splitPendingBatteryGate = true
+            emitLog("split_wait_battery_read_gate requestId=pending refreshId=${currentRefreshId()}")
+            return
+        }
 
         splitRequestScheduled = false
+        splitPendingBatteryGate = false
         splitTriggerStarted = true
         activeSplitRequestId += 1
         val requestId = activeSplitRequestId
@@ -631,6 +655,7 @@ class OpenFeelGattSession(
                 lastUpdatedAt = updatedAt
             )
         )
+        openBatteryReadGate("read_result")
     }
 
     private fun handleCharacteristicChanged(
@@ -726,6 +751,7 @@ class OpenFeelGattSession(
         refreshInFlight = false
         splitTriggerStarted = false
         splitFirstFrameAtMs = null
+        splitPendingBatteryGate = false
         transitionTo(RefreshPipelineState.Idle)
     }
 
@@ -750,6 +776,28 @@ class OpenFeelGattSession(
             delay(UI_SPLIT_WAIT_TIMEOUT_MS)
             if (refreshToken != activeRefreshToken) return@launch
             completeUiRefreshIfNeeded("timeout")
+        }
+    }
+
+    private fun scheduleBatteryReadGateTimeout(refreshToken: Long) {
+        batteryReadGateJob?.cancel()
+        emitLog("battery_read_gate_wait timeoutMs=500 refreshId=${currentRefreshId()}")
+        batteryReadGateJob = sessionScope.launch {
+            delay(500L)
+            if (refreshToken != activeRefreshToken) return@launch
+            openBatteryReadGate("timeout")
+        }
+    }
+
+    private fun openBatteryReadGate(reason: String) {
+        if (batteryReadGateOpen) return
+        batteryReadGateOpen = true
+        batteryReadGateJob?.cancel()
+        batteryReadGateJob = null
+        emitLog("battery_read_gate_open reason=$reason refreshId=${currentRefreshId()}")
+        if (splitPendingBatteryGate) {
+            splitPendingBatteryGate = false
+            requestSplitBatteryIfReady()
         }
     }
 
@@ -789,6 +837,8 @@ class OpenFeelGattSession(
         currentGatt = null
         splitNotifyReady = false
         servicesReady = false
+        splitPendingBatteryGate = false
+        batteryReadGateOpen = false
         cachedCapabilities = RefreshCapabilities(
             canReadBattery = false,
             canWriteSplit = false,
@@ -816,8 +866,14 @@ class OpenFeelGattSession(
     }
 
     private fun updateState(newState: BatteryReadUiState) {
-        currentState = newState
-        stateSink?.invoke(newState)
+        val guardedState = if (uiRefreshCompleted && newState.isRefreshing) {
+            emitLog("refresh_ui_guard suppress_isRefreshing_true refreshId=${currentRefreshId()}")
+            newState.copy(isRefreshing = false)
+        } else {
+            newState
+        }
+        currentState = guardedState
+        stateSink?.invoke(guardedState)
     }
 
     private fun emitLog(message: String) {
@@ -856,9 +912,11 @@ class OpenFeelGattSession(
         uiTimeoutJob?.cancel()
         notifyFallbackJob?.cancel()
         splitRequestJob?.cancel()
+        batteryReadGateJob?.cancel()
         uiTimeoutJob = null
         notifyFallbackJob = null
         splitRequestJob = null
+        batteryReadGateJob = null
     }
 
     private fun hasConnectPermission(): Boolean {
