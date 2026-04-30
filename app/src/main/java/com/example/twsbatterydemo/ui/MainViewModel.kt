@@ -44,9 +44,7 @@ class MainViewModel(
             )
         }
 
-        if (hasRequiredPermissions && bluetoothEnabled) {
-            ensureBackgroundScan()
-        } else {
+        if (!(hasRequiredPermissions && bluetoothEnabled)) {
             stopScan()
         }
     }
