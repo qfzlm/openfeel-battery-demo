@@ -59,6 +59,32 @@ class OpenFeelGattSession(
         val lastFrame: SplitBatteryFrame? = null
     )
 
+    private sealed interface RefreshPipelineState {
+        data object Idle : RefreshPipelineState
+        data class Connecting(
+            val token: Long,
+            val startedAt: Long
+        ) : RefreshPipelineState
+        data class Ready(
+            val token: Long,
+            val startedAt: Long,
+            val caps: RefreshCapabilities,
+            val isNotifyReady: Boolean
+        ) : RefreshPipelineState
+        data class SplitObserving(
+            val token: Long,
+            val startedAt: Long,
+            val requestId: Long,
+            val caps: RefreshCapabilities,
+            val windowEndAt: Long,
+            val firstFrameAtMs: Long? = null
+        ) : RefreshPipelineState
+    }
+
+    private data class RefreshUiState(
+        val isRefreshing: Boolean = false
+    )
+
     private val bluetoothManager: BluetoothManager =
         context.getSystemService(BluetoothManager::class.java)
     private val clientConfigUuid: UUID =
@@ -71,6 +97,9 @@ class OpenFeelGattSession(
     private var currentState: BatteryReadUiState = BatteryReadUiState()
     private var logSink: ((String) -> Unit)? = null
     private var stateSink: ((BatteryReadUiState) -> Unit)? = null
+    @Volatile
+    private var pipelineState: RefreshPipelineState = RefreshPipelineState.Idle
+    private var uiState: RefreshUiState = RefreshUiState()
     private val sessionScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var uiTimeoutJob: Job? = null
     private var notifyFallbackJob: Job? = null
@@ -121,6 +150,7 @@ class OpenFeelGattSession(
         splitRequestScheduled = false
         splitRequestStats = null
         synchronized(writeLogLock) { pendingWriteLogs.clear() }
+        uiState = RefreshUiState(isRefreshing = true)
         clearScheduledJobs()
 
         val normalizedMac = macAddress.uppercase(Locale.US)
@@ -136,6 +166,14 @@ class OpenFeelGattSession(
                 return false
             }
             updateState(currentState.copy(isRefreshing = true, isConnected = true))
+            transitionTo(
+                RefreshPipelineState.Ready(
+                    token = activeRefreshToken,
+                    startedAt = activeRefreshStartAt,
+                    caps = cachedCapabilities,
+                    isNotifyReady = splitNotifyReady
+                )
+            )
             requestBatteryLevel(gatt)
             splitRequestScheduled = cachedCapabilities.canWriteSplit && splitWriteCharacteristic != null
             if (splitNotifyReady) {
@@ -175,6 +213,14 @@ class OpenFeelGattSession(
         currentGatt = connectGattSafely(device)
         emitLog("connection_start mac=$normalizedMac name=${safeDeviceName(device)} refreshId=${currentRefreshId()}")
         val started = currentGatt != null
+        if (started) {
+            transitionTo(
+                RefreshPipelineState.Connecting(
+                    token = activeRefreshToken,
+                    startedAt = activeRefreshStartAt
+                )
+            )
+        }
         if (!started) {
             emitLog("refresh_pipeline_summary result=failed reason=connectGatt_returned_null refreshId=${currentRefreshId()}")
             completeUiRefreshIfNeeded("connect_failed")
@@ -222,6 +268,7 @@ class OpenFeelGattSession(
         uiRefreshCompleted = false
         splitTriggerStarted = false
         splitFirstFrameAtMs = null
+        transitionTo(RefreshPipelineState.Idle)
     }
 
     fun isRefreshInFlight(): Boolean = refreshInFlight
@@ -262,6 +309,7 @@ class OpenFeelGattSession(
                     servicesReady = false
                     clearScheduledJobs()
                     closeGattSafely(gatt)
+                    transitionTo(RefreshPipelineState.Idle)
                 }
             }
         }
@@ -327,6 +375,16 @@ class OpenFeelGattSession(
             cachedCapabilities = capabilities
             requestBatteryLevel(gatt)
             splitRequestScheduled = capabilities.canWriteSplit && splitWriteCharacteristic != null
+            (pipelineState as? RefreshPipelineState.Connecting)?.let { connecting ->
+                transitionTo(
+                    RefreshPipelineState.Ready(
+                        token = connecting.token,
+                        startedAt = connecting.startedAt,
+                        caps = capabilities,
+                        isNotifyReady = false
+                    )
+                )
+            }
 
             if (splitNotifyCharacteristic != null && capabilities.canNotifySplit) {
                 enableSplitNotify(gatt, splitNotifyCharacteristic!!)
@@ -350,6 +408,9 @@ class OpenFeelGattSession(
             val ownerUuid = descriptor.characteristic.uuid.toString().lowercase(Locale.US)
             if (OpenFeelBatteryParser.isPrivateNotifyCharacteristic(ownerUuid)) {
                 splitNotifyReady = status == BluetoothGatt.GATT_SUCCESS
+                (pipelineState as? RefreshPipelineState.Ready)?.let { ready ->
+                    transitionTo(ready.copy(isNotifyReady = splitNotifyReady))
+                }
                 emitLog("f2_notify_enable_result requested=true status=$status uuid=$ownerUuid refreshId=${currentRefreshId()}")
                 requestSplitBatteryIfReady()
             }
@@ -428,6 +489,9 @@ class OpenFeelGattSession(
         val descriptor = characteristic.getDescriptor(clientConfigUuid)
         if (descriptor == null) {
             splitNotifyReady = localSet
+            (pipelineState as? RefreshPipelineState.Ready)?.let { ready ->
+                transitionTo(ready.copy(isNotifyReady = splitNotifyReady))
+            }
             emitLog("f2_notify_enable_result requested=false reason=cccd_not_found fallbackReady=$splitNotifyReady uuid=${characteristic.uuid} refreshId=${currentRefreshId()}")
             requestSplitBatteryIfReady()
             return
@@ -448,6 +512,9 @@ class OpenFeelGattSession(
 
         if (!requested && localSet) {
             splitNotifyReady = true
+            (pipelineState as? RefreshPipelineState.Ready)?.let { ready ->
+                transitionTo(ready.copy(isNotifyReady = splitNotifyReady))
+            }
             emitLog("f2_notify_enable_result requested=false reason=descriptor_write_not_requested fallbackReady=true uuid=${characteristic.uuid} refreshId=${currentRefreshId()}")
             requestSplitBatteryIfReady()
         } else if (!requested) {
@@ -465,6 +532,17 @@ class OpenFeelGattSession(
         activeSplitRequestId += 1
         val requestId = activeSplitRequestId
         val windowEndAt = System.currentTimeMillis() + SPLIT_OBSERVE_WINDOW_MS
+        (pipelineState as? RefreshPipelineState.Ready)?.let { ready ->
+            transitionTo(
+                RefreshPipelineState.SplitObserving(
+                    token = ready.token,
+                    startedAt = ready.startedAt,
+                    requestId = requestId,
+                    caps = ready.caps,
+                    windowEndAt = windowEndAt
+                )
+            )
+        }
         synchronized(splitStatsLock) {
             splitRequestStats = SplitRequestStats(requestId = requestId, windowEndAt = windowEndAt)
         }
@@ -577,6 +655,9 @@ class OpenFeelGattSession(
             }
             if (splitFirstFrameAtMs == null) {
                 splitFirstFrameAtMs = (updatedAt - activeRefreshStartAt).coerceAtLeast(0L)
+                (pipelineState as? RefreshPipelineState.SplitObserving)?.let { observing ->
+                    transitionTo(observing.copy(firstFrameAtMs = splitFirstFrameAtMs))
+                }
                 completeUiRefreshIfNeeded("split_frame")
             }
             emitLog(
@@ -627,6 +708,7 @@ class OpenFeelGattSession(
         refreshInFlight = false
         splitTriggerStarted = false
         splitFirstFrameAtMs = null
+        transitionTo(RefreshPipelineState.Idle)
     }
 
     private fun scheduleNotifyReadyFallback(refreshToken: Long) {
@@ -637,6 +719,9 @@ class OpenFeelGattSession(
             if (!refreshInFlight || !splitRequestScheduled || splitNotifyReady) return@launch
             emitLog("f2_notify_enable_result requested=timeout_fallback fallbackReady=true token=$refreshToken refreshId=${currentRefreshId()}")
             splitNotifyReady = true
+            (pipelineState as? RefreshPipelineState.Ready)?.let { ready ->
+                transitionTo(ready.copy(isNotifyReady = true))
+            }
             requestSplitBatteryIfReady()
         }
     }
@@ -654,6 +739,7 @@ class OpenFeelGattSession(
     private fun completeUiRefreshIfNeeded(@Suppress("UNUSED_PARAMETER") reason: String) {
         if (uiRefreshCompleted) return
         uiRefreshCompleted = true
+        uiState = RefreshUiState(isRefreshing = false)
         val elapsedMs = (System.currentTimeMillis() - activeRefreshStartAt).coerceAtLeast(0L)
         emitLog("refresh_ui_complete reason=$reason elapsedMs=$elapsedMs refreshId=${currentRefreshId()}")
         updateState(currentState.copy(isRefreshing = false))
@@ -738,6 +824,15 @@ class OpenFeelGattSession(
     }
 
     private fun currentRefreshId(): Long = activeRefreshToken
+
+    private fun transitionTo(newState: RefreshPipelineState) {
+        val oldState = pipelineState
+        pipelineState = newState
+        emitLog(
+            "pipeline_state from=${oldState.javaClass.simpleName} " +
+                "to=${newState.javaClass.simpleName} refreshId=${currentRefreshId()}"
+        )
+    }
 
     private fun clearScheduledJobs() {
         uiTimeoutJob?.cancel()
