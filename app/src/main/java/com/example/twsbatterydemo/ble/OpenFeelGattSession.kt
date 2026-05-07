@@ -718,12 +718,15 @@ class OpenFeelGattSession(
         val stats = synchronized(splitStatsLock) { splitRequestStats } ?: return
         if (stats.requestId != requestId) return
 
+        val observingState = pipelineState as? RefreshPipelineState.SplitObserving
+        val splitTriggeredForSummary = observingState != null
+        val firstFrameAtForSummary = observingState?.firstFrameAtMs ?: -1L
         emitLog(
-            "refresh_pipeline_summary result=completed splitTriggered=$splitTriggerStarted hasNotify=${stats.notifyCount > 0} " +
+            "refresh_pipeline_summary result=completed splitTriggered=$splitTriggeredForSummary hasNotify=${stats.notifyCount > 0} " +
                 "has040c=${stats.splitFrameCount > 0} notifyCount=${stats.notifyCount} " +
                 "frameCount=${stats.splitFrameCount} writeCount=${stats.writeRequestCount} " +
                 "writeSuccessCount=${stats.writeRequestSuccessCount} " +
-                "firstFrameAt=${splitFirstFrameAtMs ?: -1}ms " +
+                "firstFrameAt=${firstFrameAtForSummary}ms " +
                 "last=${formatLastFrame(stats.lastFrame)} requestId=$requestId refreshId=${currentRefreshId()}"
         )
         val shadowObserving = pipelineState as? RefreshPipelineState.SplitObserving
