@@ -87,6 +87,19 @@ class OpenFeelBatteryParserTest {
     }
 
     @Test
+    fun parseSplitBatteryFrame_appliesSevenBitMaskToExtremeRawLevels() {
+        val parsed = OpenFeelBatteryParser.parseSplitBatteryFrame(
+            byteArrayOf(0xDD.toByte(), 0x0A, 0x04, 0x0C, 0xFF.toByte(), 0x80.toByte(), 0x7F, 0xAA.toByte())
+        )
+
+        assertNotNull(parsed)
+        assertEquals(0x0A, parsed!!.sequence)
+        assertEquals(127, parsed.leftBattery)
+        assertEquals(0, parsed.rightBattery)
+        assertEquals(127, parsed.caseBattery)
+    }
+
+    @Test
     fun parseSplitBatteryFrame_sizeGreaterThan8_stillParses() {
         val parsed = OpenFeelBatteryParser.parseSplitBatteryFrame(
             byteArrayOf(
