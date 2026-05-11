@@ -1,5 +1,6 @@
 package com.example.twsbatterydemo.protocol
 
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -8,6 +9,24 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OpenFeelBatteryParserTest {
+
+    @Test
+    fun splitBatteryCommands_returnsExpectedCommandBytes() {
+        val commands = OpenFeelBatteryParser.splitBatteryCommands()
+
+        assertEquals(2, commands.size)
+        assertArrayEquals(
+            byteArrayOf(
+                0xFF.toByte(), 0x00, 0x0F, 0xFA.toByte(), 0x01, 0x07, 0x08, 0x09, 0x0C, 0x0D,
+                0x0E, 0x12, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x33, 0xAA.toByte()
+            ),
+            commands[0]
+        )
+        assertArrayEquals(
+            byteArrayOf(0xFF.toByte(), 0x00, 0x02, 0xFA.toByte(), 0x2B, 0xAA.toByte()),
+            commands[1]
+        )
+    }
 
     @Test
     fun parseBatteryLevel_empty_returnsNull() {
