@@ -20,3 +20,6 @@ local.properties
 # OS files
 .DS_Store
 Thumbs.db
+
+# Local Codex tooling artifacts
+docs/superpowers/
