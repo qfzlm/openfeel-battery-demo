@@ -886,6 +886,10 @@ class OpenFeelGattSession(
         logSink?.invoke(message)
     }
 
+    private fun safeEmitDebugLog(message: String) {
+        runCatching { emitLog(message) }
+    }
+
     private fun formatLastFrame(frame: SplitBatteryFrame?): String {
         if (frame == null) return "none"
         return "L=${frame.leftBattery} R=${frame.rightBattery} C=${frame.caseBattery}"
@@ -938,6 +942,11 @@ class OpenFeelGattSession(
         if (!hasConnectPermission()) return null
         return runCatching {
             device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+        }.onFailure {
+            safeEmitDebugLog(
+                "op=connectGatt ex=${it.javaClass.simpleName} " +
+                    "msg=${it.message ?: "null"} mac=${device.address}"
+            )
         }.getOrNull()
     }
 
@@ -962,7 +971,14 @@ class OpenFeelGattSession(
     @SuppressLint("MissingPermission")
     private fun discoverServicesSafely(gatt: BluetoothGatt): Boolean {
         if (!hasConnectPermission()) return false
-        return runCatching { gatt.discoverServices() }.getOrDefault(false)
+        return runCatching { gatt.discoverServices() }
+            .onFailure {
+                safeEmitDebugLog(
+                    "op=discoverServices ex=${it.javaClass.simpleName} " +
+                        "msg=${it.message ?: "null"} mac=${gatt.device.address}"
+                )
+            }
+            .getOrDefault(false)
     }
 
     @SuppressLint("MissingPermission")
@@ -971,7 +987,14 @@ class OpenFeelGattSession(
         characteristic: BluetoothGattCharacteristic
     ): Boolean {
         if (!hasConnectPermission()) return false
-        return runCatching { gatt.readCharacteristic(characteristic) }.getOrDefault(false)
+        return runCatching { gatt.readCharacteristic(characteristic) }
+            .onFailure {
+                safeEmitDebugLog(
+                    "op=readCharacteristic ex=${it.javaClass.simpleName} " +
+                        "msg=${it.message ?: "null"} uuid=${characteristic.uuid} mac=${gatt.device.address}"
+                )
+            }
+            .getOrDefault(false)
     }
 
     @SuppressLint("MissingPermission")
@@ -1017,6 +1040,11 @@ class OpenFeelGattSession(
         if (!hasConnectPermission()) return false
         return runCatching {
             gatt.writeCharacteristic(characteristic, value, writeType) == BluetoothStatusCodes.SUCCESS
+        }.onFailure {
+            safeEmitDebugLog(
+                "op=writeCharacteristic_api33 ex=${it.javaClass.simpleName} " +
+                    "msg=${it.message ?: "null"} uuid=${characteristic.uuid} writeType=$writeType mac=${gatt.device.address}"
+            )
         }.getOrDefault(false)
     }
 
@@ -1026,7 +1054,14 @@ class OpenFeelGattSession(
         characteristic: BluetoothGattCharacteristic
     ): Boolean {
         if (!hasConnectPermission()) return false
-        return runCatching { gatt.writeCharacteristic(characteristic) }.getOrDefault(false)
+        return runCatching { gatt.writeCharacteristic(characteristic) }
+            .onFailure {
+                safeEmitDebugLog(
+                    "op=writeCharacteristic_legacy ex=${it.javaClass.simpleName} " +
+                        "msg=${it.message ?: "null"} uuid=${characteristic.uuid} mac=${gatt.device.address}"
+                )
+            }
+            .getOrDefault(false)
     }
 
     @SuppressLint("MissingPermission")
