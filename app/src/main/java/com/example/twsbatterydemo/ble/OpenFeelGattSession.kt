@@ -545,8 +545,10 @@ class OpenFeelGattSession(
         val characteristic = splitWriteCharacteristic ?: return
         if (!splitRequestScheduled || !splitNotifyReady) return
         if (!batteryReadGateOpen) {
-            splitPendingBatteryGate = true
-            emitLog("split_wait_battery_read_gate requestId=pending refreshId=${currentRefreshId()}")
+            if (!splitPendingBatteryGate) {
+                splitPendingBatteryGate = true
+                emitLog("split_wait_battery_read_gate requestId=pending refreshId=${currentRefreshId()}")
+            }
             return
         }
 
