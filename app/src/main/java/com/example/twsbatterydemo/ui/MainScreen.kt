@@ -259,7 +259,7 @@ fun MainScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 RefreshBatteryButton(
-                    isLoading = state.batteryReadState.isRefreshing,
+                    isLoading = state.batteryReadState.isRefreshButtonBusy,
                     onClick = onRefreshBattery
                 )
                 SecondaryActionButton(
@@ -467,7 +467,7 @@ private fun RefreshBatteryButton(
         )
         Spacer(modifier = Modifier.size(10.dp))
         Text(
-            text = if (isLoading) "读取中" else "刷新电量",
+            text = if (isLoading) "刷新中…" else "刷新电量",
             fontSize = 18.sp,
             fontWeight = FontWeight.SemiBold
         )

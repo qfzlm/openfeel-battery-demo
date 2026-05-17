@@ -146,7 +146,7 @@ class OpenFeelGattSession(
         }
         logSink = onLog
         stateSink = onState
-        refreshInFlight = true
+        setRefreshInFlightAndButtonBusy(true)
         activeRefreshToken += 1
         activeRefreshStartAt = System.currentTimeMillis()
         uiRefreshCompleted = false
@@ -169,7 +169,7 @@ class OpenFeelGattSession(
 
         if (reusable) {
             val gatt = currentGatt ?: run {
-                refreshInFlight = false
+                setRefreshInFlightAndButtonBusy(false)
                 return false
             }
             updateState(currentState.copy(isRefreshing = true, isConnected = true))
@@ -192,7 +192,7 @@ class OpenFeelGattSession(
                     scheduleNotifyReadyFallback(activeRefreshToken)
                 } else {
                     emitLog(capabilityMissingSummary(cachedCapabilities))
-                    refreshInFlight = false
+                    setRefreshInFlightAndButtonBusy(false)
                 }
             }
             return true
@@ -205,7 +205,7 @@ class OpenFeelGattSession(
             emitLog("connection_start failed reason=no_adapter")
             updateState(currentState.copy(isRefreshing = false, isConnected = false))
             completeUiRefreshIfNeeded("no_adapter")
-            refreshInFlight = false
+            setRefreshInFlightAndButtonBusy(false)
             return false
         }
 
@@ -213,7 +213,7 @@ class OpenFeelGattSession(
             emitLog("connection_start failed reason=invalid_mac mac=$normalizedMac")
             updateState(currentState.copy(isRefreshing = false, isConnected = false))
             completeUiRefreshIfNeeded("invalid_mac")
-            refreshInFlight = false
+            setRefreshInFlightAndButtonBusy(false)
             return false
         }
 
@@ -231,7 +231,7 @@ class OpenFeelGattSession(
         if (!started) {
             emitLog("refresh_pipeline_summary result=failed reason=connectGatt_returned_null refreshId=${currentRefreshId()}")
             completeUiRefreshIfNeeded("connect_failed")
-            refreshInFlight = false
+            setRefreshInFlightAndButtonBusy(false)
         }
         return started
     }
@@ -273,7 +273,7 @@ class OpenFeelGattSession(
                 )
             )
         }
-        refreshInFlight = false
+        setRefreshInFlightAndButtonBusy(false)
         uiRefreshCompleted = false
         splitTriggerStarted = false
         splitFirstFrameAtMs = null
@@ -283,6 +283,11 @@ class OpenFeelGattSession(
     }
 
     fun isRefreshInFlight(): Boolean = refreshInFlight
+
+    private fun setRefreshInFlightAndButtonBusy(inFlight: Boolean) {
+        refreshInFlight = inFlight
+        updateState(currentState.copy(isRefreshButtonBusy = inFlight))
+    }
 
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
@@ -316,7 +321,7 @@ class OpenFeelGattSession(
                         )
                     )
                     completeUiRefreshIfNeeded("disconnected")
-                    refreshInFlight = false
+                    setRefreshInFlightAndButtonBusy(false)
                     servicesReady = false
                     clearScheduledJobs()
                     closeGattSafely(gatt)
@@ -333,7 +338,7 @@ class OpenFeelGattSession(
                 updateState(currentState.copy(isRefreshing = false, isConnected = true))
                 emitLog("refresh_pipeline_summary result=failed reason=discover_services_failed status=$status refreshId=${currentRefreshId()}")
                 completeUiRefreshIfNeeded("discover_failed")
-                refreshInFlight = false
+                setRefreshInFlightAndButtonBusy(false)
                 return
             }
 
@@ -409,7 +414,7 @@ class OpenFeelGattSession(
                 requestSplitBatteryIfReady()
             } else {
                 emitLog(capabilityMissingSummary(capabilities))
-                refreshInFlight = false
+                setRefreshInFlightAndButtonBusy(false)
             }
         }
 
@@ -753,7 +758,7 @@ class OpenFeelGattSession(
             splitRequestStats = null
         }
         completeUiRefreshIfNeeded("window_complete")
-        refreshInFlight = false
+        setRefreshInFlightAndButtonBusy(false)
         splitTriggerStarted = false
         splitFirstFrameAtMs = null
         splitPendingBatteryGate = false

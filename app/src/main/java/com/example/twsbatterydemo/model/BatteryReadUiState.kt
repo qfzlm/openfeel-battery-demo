@@ -2,6 +2,7 @@ package com.example.twsbatterydemo.model
 
 data class BatteryReadUiState(
     val isRefreshing: Boolean = false,
+    val isRefreshButtonBusy: Boolean = false,
     val isConnected: Boolean = false,
     val totalBatteryPercent: Int? = null,
     val leftBatteryPercent: Int? = null,
