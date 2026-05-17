@@ -765,6 +765,34 @@ class OpenFeelGattSession(
         notifyFallbackJob = sessionScope.launch {
             delay(1_200L)
             if (refreshToken != activeRefreshToken) return@launch
+            val oldNotifyReady = splitNotifyReady
+            val shadowState = pipelineState
+            when (shadowState) {
+                is RefreshPipelineState.Ready -> {
+                    val shadowNotifyReady = shadowState.isNotifyReady
+                    if (oldNotifyReady == shadowNotifyReady) {
+                        emitLog(
+                            "notify_ready_shadow MATCH old=$oldNotifyReady shadow=$shadowNotifyReady " +
+                                "state=Ready inFlight=$refreshInFlight scheduled=$splitRequestScheduled " +
+                                "token=$refreshToken refreshId=${currentRefreshId()}"
+                        )
+                    } else {
+                        emitLog(
+                            "notify_ready_shadow MISMATCH old=$oldNotifyReady shadow=$shadowNotifyReady " +
+                                "state=Ready inFlight=$refreshInFlight scheduled=$splitRequestScheduled " +
+                                "token=$refreshToken refreshId=${currentRefreshId()}"
+                        )
+                    }
+                }
+
+                else -> {
+                    emitLog(
+                        "notify_ready_shadow UNAVAILABLE old=$oldNotifyReady shadow=unavailable " +
+                            "state=${shadowState.javaClass.simpleName} inFlight=$refreshInFlight scheduled=$splitRequestScheduled " +
+                            "token=$refreshToken refreshId=${currentRefreshId()}"
+                    )
+                }
+            }
             if (!refreshInFlight || !splitRequestScheduled || splitNotifyReady) return@launch
             emitLog("f2_notify_enable_result requested=timeout_fallback fallbackReady=true token=$refreshToken refreshId=${currentRefreshId()}")
             splitNotifyReady = true
