@@ -669,52 +669,71 @@ class OpenFeelGattSession(
         characteristic: BluetoothGattCharacteristic,
         value: ByteArray
     ) {
+        val notifyAt = System.currentTimeMillis()
         val characteristicUuid = characteristic.uuid.toString().lowercase(Locale.US)
         if (!OpenFeelBatteryParser.isPrivateNotifyCharacteristic(characteristicUuid)) return
 
         val rawHex = value.toHexString()
-        emitLog("f2_raw_notify ts=${System.currentTimeMillis()} hex=$rawHex refreshId=${currentRefreshId()}")
+        emitLog("f2_raw_notify ts=$notifyAt hex=$rawHex refreshId=${currentRefreshId()}")
 
         val parsed = OpenFeelBatteryParser.parseSplitBatteryFrame(value)
         if (parsed != null) {
-            val updatedAt = System.currentTimeMillis()
             val statsAtFrame = synchronized(splitStatsLock) { splitRequestStats }
+            val ignoredDetail = when {
+                statsAtFrame == null -> "no_stats"
+                statsAtFrame.requestId != activeSplitRequestId -> "request_id_mismatch"
+                notifyAt > statsAtFrame.windowEndAt -> "window_expired"
+                else -> "unknown"
+            }
+            val activeRequest = statsAtFrame != null &&
+                statsAtFrame.requestId == activeSplitRequestId &&
+                notifyAt <= statsAtFrame.windowEndAt
             val receiveSource = when {
                 statsAtFrame == null -> "passive"
                 statsAtFrame.writeRequestSuccessCount > 0 -> "active_trigger"
                 statsAtFrame.writeRequestCount > 0 -> "passive_after_queue_failed"
                 else -> "passive"
             }
-            if (splitFirstFrameAtMs == null) {
-                splitFirstFrameAtMs = (updatedAt - activeRefreshStartAt).coerceAtLeast(0L)
-                (pipelineState as? RefreshPipelineState.SplitObserving)?.let { observing ->
-                    transitionTo(observing.copy(firstFrameAtMs = splitFirstFrameAtMs))
-                }
-                completeUiRefreshIfNeeded("split_frame")
-            }
-            emitLog(
-                "split_040c_parsed seq=${toHexByte(parsed.sequence)} " +
-                    "left=${parsed.leftBattery} right=${parsed.rightBattery} case=${parsed.caseBattery} " +
-                    "source=$receiveSource refreshId=${currentRefreshId()}"
-            )
-            updateState(
-                currentState.copy(
-                    leftBatteryPercent = parsed.leftBattery,
-                    rightBatteryPercent = parsed.rightBattery,
-                    caseBatteryPercent = parsed.caseBattery,
-                    lastUpdatedAt = updatedAt
+            if (!activeRequest) {
+                emitLog(
+                    "split_040c_ignored reason=not_active_request detail=$ignoredDetail " +
+                        "seq=${toHexByte(parsed.sequence)} left=${parsed.leftBattery} right=${parsed.rightBattery} case=${parsed.caseBattery} " +
+                        "requestId=${statsAtFrame?.requestId ?: "none"} activeRequestId=$activeSplitRequestId " +
+                        "refreshId=${currentRefreshId()}"
                 )
-            )
+            } else {
+                if (splitFirstFrameAtMs == null) {
+                    splitFirstFrameAtMs = (notifyAt - activeRefreshStartAt).coerceAtLeast(0L)
+                    (pipelineState as? RefreshPipelineState.SplitObserving)?.let { observing ->
+                        transitionTo(observing.copy(firstFrameAtMs = splitFirstFrameAtMs))
+                    }
+                    completeUiRefreshIfNeeded("split_frame")
+                }
+                emitLog(
+                    "split_040c_parsed seq=${toHexByte(parsed.sequence)} " +
+                        "left=${parsed.leftBattery} right=${parsed.rightBattery} case=${parsed.caseBattery} " +
+                        "source=$receiveSource refreshId=${currentRefreshId()}"
+                )
+                updateState(
+                    currentState.copy(
+                        leftBatteryPercent = parsed.leftBattery,
+                        rightBatteryPercent = parsed.rightBattery,
+                        caseBatteryPercent = parsed.caseBattery,
+                        lastUpdatedAt = notifyAt
+                    )
+                )
+            }
         }
 
         val stats = synchronized(splitStatsLock) { splitRequestStats } ?: return
-        if (System.currentTimeMillis() > stats.windowEndAt) return
+        if (stats.requestId != activeSplitRequestId) return
+        if (notifyAt > stats.windowEndAt) return
 
         synchronized(splitStatsLock) {
             splitRequestStats = stats.copy(
                 notifyCount = stats.notifyCount + 1,
                 splitFrameCount = stats.splitFrameCount + if (parsed != null) 1 else 0,
-                lastNotifyAt = System.currentTimeMillis(),
+                lastNotifyAt = notifyAt,
                 lastFrame = parsed ?: stats.lastFrame
             )
         }
