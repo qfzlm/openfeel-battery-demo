@@ -284,9 +284,13 @@ class OpenFeelGattSession(
 
     fun isRefreshInFlight(): Boolean = refreshInFlight
 
+    private fun setRefreshButtonBusy(busy: Boolean) {
+        updateState(currentState.copy(isRefreshButtonBusy = busy))
+    }
+
     private fun setRefreshInFlightAndButtonBusy(inFlight: Boolean) {
         refreshInFlight = inFlight
-        updateState(currentState.copy(isRefreshButtonBusy = inFlight))
+        setRefreshButtonBusy(inFlight)
     }
 
     private val gattCallback = object : BluetoothGattCallback() {
@@ -722,6 +726,7 @@ class OpenFeelGattSession(
                         lastUpdatedAt = notifyAt
                     )
                 )
+                setRefreshButtonBusy(false)
             }
         }
 
