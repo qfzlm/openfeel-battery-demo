@@ -42,8 +42,7 @@ class MainActivity : ComponentActivity() {
                         } else {
                             viewModel.refreshBatteryNow()
                         }
-                    },
-                    onExportLogs = { viewModel.exportLogs(this) },
+                    }
                 )
             }
         }

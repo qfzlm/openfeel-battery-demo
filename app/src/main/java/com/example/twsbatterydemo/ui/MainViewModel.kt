@@ -1,30 +1,18 @@
 package com.example.twsbatterydemo.ui
 
-import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.viewModelScope
 import com.example.twsbatterydemo.ble.BleScannerManager
 import com.example.twsbatterydemo.model.BatteryReadUiState
-import com.example.twsbatterydemo.model.LogExportUiState
 import com.example.twsbatterydemo.model.ScanUiState
-import com.example.twsbatterydemo.util.DownloadLogExporter
-import com.example.twsbatterydemo.util.InMemoryLogStore
-import com.example.twsbatterydemo.util.TimeUtils
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
 
 class MainViewModel(
     private val bleScannerManager: BleScannerManager
 ) : ViewModel() {
 
-    private val logStore = InMemoryLogStore(capacity = 1000)
-    private val exportFormatter = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss")
     private var isScanActive = false
 
     private val _uiState = MutableStateFlow(ScanUiState())
@@ -54,7 +42,6 @@ class MainViewModel(
         val state = _uiState.value
 
         if (bleScannerManager.isRefreshInFlight()) {
-            recordLog("refresh_ignored reason=in_flight")
             return
         }
         if (!state.hasRequiredPermissions) {
@@ -66,40 +53,15 @@ class MainViewModel(
             return
         }
 
-        recordLog("refresh_requested targetMac=41:42:D3:16:6F:68")
         val started = bleScannerManager.refreshBattery(
-            onLog = ::recordLog,
+            onLog = {},
             onState = ::updateBatteryState
         )
         if (!started) {
             if (bleScannerManager.isRefreshInFlight()) {
-                recordLog("refresh_ignored reason=in_flight")
                 return
             }
             _uiState.update { it.copy(errorMessage = "刷新失败，请确认耳机已开盖") }
-        }
-    }
-
-    fun exportLogs(context: Context) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val displayName = "ble_log_${LocalDateTime.now().format(exportFormatter)}.txt"
-            val result = DownloadLogExporter.exportText(
-                context = context,
-                displayName = displayName,
-                content = logStore.snapshot().joinToString("\n")
-            )
-            recordLog(
-                "log_export result=${result.message} uri=${result.contentUri ?: "null"} size=${result.sizeBytes ?: -1}"
-            )
-            _uiState.update {
-                it.copy(
-                    logExportState = LogExportUiState(
-                        message = result.message,
-                        contentUri = result.contentUri,
-                        sizeBytes = result.sizeBytes
-                    )
-                )
-            }
         }
     }
 
@@ -114,10 +76,8 @@ class MainViewModel(
 
         val started = bleScannerManager.startScan(
             onError = { message ->
-                recordLog("scan_error message=$message")
                 _uiState.update { it.copy(errorMessage = message) }
-            },
-            onDebugLog = ::recordLog
+            }
         )
 
         if (started) {
@@ -133,10 +93,6 @@ class MainViewModel(
                 errorMessage = null
             )
         }
-    }
-
-    private fun recordLog(message: String) {
-        logStore.append("${TimeUtils.format(System.currentTimeMillis())} | $message")
     }
 
     override fun onCleared() {

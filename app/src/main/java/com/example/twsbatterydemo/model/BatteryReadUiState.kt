@@ -10,9 +10,3 @@ data class BatteryReadUiState(
     val caseBatteryPercent: Int? = null,
     val lastUpdatedAt: Long = 0L
 )
-
-data class LogExportUiState(
-    val message: String? = null,
-    val contentUri: String? = null,
-    val sizeBytes: Long? = null
-)

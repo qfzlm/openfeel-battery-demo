@@ -5,6 +5,5 @@ data class ScanUiState(
     val hasRequiredPermissions: Boolean = false,
     val missingPermissions: List<String> = emptyList(),
     val errorMessage: String? = null,
-    val batteryReadState: BatteryReadUiState = BatteryReadUiState(),
-    val logExportState: LogExportUiState = LogExportUiState()
+    val batteryReadState: BatteryReadUiState = BatteryReadUiState()
 )

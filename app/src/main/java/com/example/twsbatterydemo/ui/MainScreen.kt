@@ -11,7 +11,6 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -31,7 +30,6 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -82,8 +80,6 @@ private object BatteryUiColors {
     val MetaValueMuted = Color(0xFFAAB8D3)
     val PrimaryButton = Color(0xFF4457FF)
     val PrimaryButtonPressed = Color(0xFF3547EA)
-    val SecondaryBorder = Color(0xFF243D69)
-    val SecondaryText = Color(0xFFCBD8F0)
     val Error = Color(0xFFFF8090)
 }
 
@@ -95,14 +91,12 @@ private object BatteryUiMetrics {
     val MetaTopSpacing = 28.dp
     val MetaValueTopSpacing = 6.dp
     val PrimaryButtonHeight = 56.dp
-    val SecondaryButtonHeight = 50.dp
 }
 
 @Composable
 fun MainScreen(
     state: ScanUiState,
-    onRefreshBattery: () -> Unit,
-    onExportLogs: () -> Unit
+    onRefreshBattery: () -> Unit
 ) {
     val batteryLevel = state.batteryReadState.totalBatteryPercent
     val status = when {
@@ -261,10 +255,6 @@ fun MainScreen(
                 RefreshBatteryButton(
                     isLoading = state.batteryReadState.isRefreshButtonBusy,
                     onClick = onRefreshBattery
-                )
-                SecondaryActionButton(
-                    text = "导出日志",
-                    onClick = onExportLogs
                 )
             }
         }
@@ -474,39 +464,6 @@ private fun RefreshBatteryButton(
     }
 }
 
-@Composable
-private fun SecondaryActionButton(
-    text: String,
-    onClick: () -> Unit
-) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.986f else 1f,
-        animationSpec = spring(dampingRatio = 0.74f, stiffness = 520f),
-        label = "secondaryButtonScale"
-    )
-
-    OutlinedButton(
-        onClick = onClick,
-        interactionSource = interactionSource,
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(BatteryUiMetrics.SecondaryButtonHeight)
-            .scale(scale),
-        shape = RoundedCornerShape(16.dp),
-        colors = ButtonDefaults.outlinedButtonColors(contentColor = BatteryUiColors.SecondaryText),
-        border = BorderStroke(1.dp, BatteryUiColors.SecondaryBorder)
-    ) {
-        ShareGlyph(
-            modifier = Modifier.size(18.dp),
-            tint = BatteryUiColors.SecondaryText.copy(alpha = 0.9f)
-        )
-        Spacer(modifier = Modifier.size(10.dp))
-        Text(text = text, fontSize = 17.sp, fontWeight = FontWeight.Medium)
-    }
-}
-
 private fun buildSyncText(lastUpdatedAt: Long): String {
     if (lastUpdatedAt <= 0L) return "N/A"
     return TimeUtils.format(lastUpdatedAt)
@@ -602,22 +559,3 @@ private fun RefreshGlyph(
     }
 }
 
-@Composable
-private fun ShareGlyph(
-    modifier: Modifier,
-    tint: Color
-) {
-    Canvas(modifier = modifier) {
-        val radius = size.minDimension * 0.11f
-        val left = Offset(size.width * 0.24f, size.height * 0.5f)
-        val top = Offset(size.width * 0.71f, size.height * 0.28f)
-        val bottom = Offset(size.width * 0.71f, size.height * 0.72f)
-        val strokeWidth = size.minDimension * 0.1f
-
-        drawLine(color = tint, start = left, end = top, strokeWidth = strokeWidth, cap = StrokeCap.Round)
-        drawLine(color = tint, start = left, end = bottom, strokeWidth = strokeWidth, cap = StrokeCap.Round)
-        drawCircle(color = tint, radius = radius, center = left)
-        drawCircle(color = tint, radius = radius, center = top)
-        drawCircle(color = tint, radius = radius, center = bottom)
-    }
-}
