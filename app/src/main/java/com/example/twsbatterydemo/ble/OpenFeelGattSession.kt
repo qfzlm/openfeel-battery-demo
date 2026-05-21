@@ -792,24 +792,11 @@ class OpenFeelGattSession(
                 "firstFrameAt=${firstFrameAtForSummary}ms " +
                 "last=${formatLastFrame(stats.lastFrame)} requestId=$requestId refreshId=${currentRefreshId()}"
         )
-        val shadowObserving = pipelineState as? RefreshPipelineState.SplitObserving
-        val shadowTriggered = shadowObserving != null
-        val shadowFirstFrame = shadowObserving?.firstFrameAtMs ?: -1L
-        val oldFirstFrame = splitFirstFrameAtMs ?: -1L
-        if (shadowTriggered != splitTriggerStarted || shadowFirstFrame != oldFirstFrame) {
-            emitLog(
-                "pipeline_state_shadow MISMATCH " +
-                    "splitTriggeredShadow=$shadowTriggered splitTriggeredOld=$splitTriggerStarted " +
-                    "firstFrameAtShadow=${shadowFirstFrame}ms firstFrameAtOld=${oldFirstFrame}ms " +
-                    "requestId=$requestId refreshId=${currentRefreshId()}"
-            )
-        } else {
-            emitLog(
-                "pipeline_state_shadow MATCH " +
-                    "splitTriggered=$shadowTriggered firstFrameAt=${shadowFirstFrame}ms " +
-                    "requestId=$requestId refreshId=${currentRefreshId()}"
-            )
-        }
+        logPipelineShadowState(
+            requestId = requestId,
+            expectedTriggered = splitTriggerStarted,
+            expectedFirstFrameAtMs = splitFirstFrameAtMs ?: -1L
+        )
         synchronized(splitStatsLock) {
             splitRequestStats = null
         }
@@ -819,6 +806,30 @@ class OpenFeelGattSession(
         splitFirstFrameAtMs = null
         splitPendingBatteryGate = false
         transitionTo(RefreshPipelineState.Idle)
+    }
+
+    private fun logPipelineShadowState(
+        requestId: Long,
+        expectedTriggered: Boolean,
+        expectedFirstFrameAtMs: Long
+    ) {
+        val shadowObserving = pipelineState as? RefreshPipelineState.SplitObserving
+        val shadowTriggered = shadowObserving != null
+        val shadowFirstFrame = shadowObserving?.firstFrameAtMs ?: -1L
+        if (shadowTriggered != expectedTriggered || shadowFirstFrame != expectedFirstFrameAtMs) {
+            emitLog(
+                "pipeline_state_shadow MISMATCH " +
+                    "splitTriggeredShadow=$shadowTriggered splitTriggeredOld=$expectedTriggered " +
+                    "firstFrameAtShadow=${shadowFirstFrame}ms firstFrameAtOld=${expectedFirstFrameAtMs}ms " +
+                    "requestId=$requestId refreshId=${currentRefreshId()}"
+            )
+        } else {
+            emitLog(
+                "pipeline_state_shadow MATCH " +
+                    "splitTriggered=$shadowTriggered firstFrameAt=${shadowFirstFrame}ms " +
+                    "requestId=$requestId refreshId=${currentRefreshId()}"
+            )
+        }
     }
 
     private fun scheduleNotifyReadyFallback(refreshToken: Long) {
