@@ -59,6 +59,13 @@ class OpenFeelGattSession(
         val lastFrame: SplitBatteryFrame? = null
     )
 
+    private data class SplitFrameClassification(
+        val isActiveRequest: Boolean,
+        val ignoredDetail: String,
+        val receiveSource: String,
+        val requestIdForLog: Long?
+    )
+
     private sealed interface RefreshPipelineState {
         data object Idle : RefreshPipelineState
         data class Connecting(
@@ -682,54 +689,79 @@ class OpenFeelGattSession(
 
         val parsed = OpenFeelBatteryParser.parseSplitBatteryFrame(value)
         if (parsed != null) {
-            val statsAtFrame = synchronized(splitStatsLock) { splitRequestStats }
-            val ignoredDetail = when {
-                statsAtFrame == null -> "no_stats"
-                statsAtFrame.requestId != activeSplitRequestId -> "request_id_mismatch"
-                notifyAt > statsAtFrame.windowEndAt -> "window_expired"
-                else -> "unknown"
-            }
-            val activeRequest = statsAtFrame != null &&
-                statsAtFrame.requestId == activeSplitRequestId &&
-                notifyAt <= statsAtFrame.windowEndAt
-            val receiveSource = when {
-                statsAtFrame == null -> "passive"
-                statsAtFrame.writeRequestSuccessCount > 0 -> "active_trigger"
-                statsAtFrame.writeRequestCount > 0 -> "passive_after_queue_failed"
-                else -> "passive"
-            }
-            if (!activeRequest) {
+            val classification = classifySplitNotifyFrame(notifyAt)
+            if (!classification.isActiveRequest) {
                 emitLog(
-                    "split_040c_ignored reason=not_active_request detail=$ignoredDetail " +
+                    "split_040c_ignored reason=not_active_request detail=${classification.ignoredDetail} " +
                         "seq=${toHexByte(parsed.sequence)} left=${parsed.leftBattery} right=${parsed.rightBattery} case=${parsed.caseBattery} " +
-                        "requestId=${statsAtFrame?.requestId ?: "none"} activeRequestId=$activeSplitRequestId " +
+                        "requestId=${classification.requestIdForLog ?: "none"} activeRequestId=$activeSplitRequestId " +
                         "refreshId=${currentRefreshId()}"
                 )
             } else {
-                if (splitFirstFrameAtMs == null) {
-                    splitFirstFrameAtMs = (notifyAt - activeRefreshStartAt).coerceAtLeast(0L)
-                    (pipelineState as? RefreshPipelineState.SplitObserving)?.let { observing ->
-                        transitionTo(observing.copy(firstFrameAtMs = splitFirstFrameAtMs))
-                    }
-                    completeUiRefreshIfNeeded("split_frame")
-                }
-                emitLog(
-                    "split_040c_parsed seq=${toHexByte(parsed.sequence)} " +
-                        "left=${parsed.leftBattery} right=${parsed.rightBattery} case=${parsed.caseBattery} " +
-                        "source=$receiveSource refreshId=${currentRefreshId()}"
-                )
-                updateState(
-                    currentState.copy(
-                        leftBatteryPercent = parsed.leftBattery,
-                        rightBatteryPercent = parsed.rightBattery,
-                        caseBatteryPercent = parsed.caseBattery,
-                        lastUpdatedAt = notifyAt
-                    )
-                )
-                setRefreshButtonBusy(false)
+                applyAcceptedSplitFrame(parsed, notifyAt, classification.receiveSource)
             }
         }
 
+        accumulateSplitNotifyStats(notifyAt, parsed)
+    }
+
+    private fun classifySplitNotifyFrame(notifyAt: Long): SplitFrameClassification {
+        val statsAtFrame = synchronized(splitStatsLock) { splitRequestStats }
+        val ignoredDetail = when {
+            statsAtFrame == null -> "no_stats"
+            statsAtFrame.requestId != activeSplitRequestId -> "request_id_mismatch"
+            notifyAt > statsAtFrame.windowEndAt -> "window_expired"
+            else -> "unknown"
+        }
+        val activeRequest = statsAtFrame != null &&
+            statsAtFrame.requestId == activeSplitRequestId &&
+            notifyAt <= statsAtFrame.windowEndAt
+        val receiveSource = when {
+            statsAtFrame == null -> "passive"
+            statsAtFrame.writeRequestSuccessCount > 0 -> "active_trigger"
+            statsAtFrame.writeRequestCount > 0 -> "passive_after_queue_failed"
+            else -> "passive"
+        }
+        return SplitFrameClassification(
+            isActiveRequest = activeRequest,
+            ignoredDetail = ignoredDetail,
+            receiveSource = receiveSource,
+            requestIdForLog = statsAtFrame?.requestId
+        )
+    }
+
+    private fun applyAcceptedSplitFrame(
+        parsed: SplitBatteryFrame,
+        notifyAt: Long,
+        receiveSource: String
+    ) {
+        if (splitFirstFrameAtMs == null) {
+            splitFirstFrameAtMs = (notifyAt - activeRefreshStartAt).coerceAtLeast(0L)
+            (pipelineState as? RefreshPipelineState.SplitObserving)?.let { observing ->
+                transitionTo(observing.copy(firstFrameAtMs = splitFirstFrameAtMs))
+            }
+            completeUiRefreshIfNeeded("split_frame")
+        }
+        emitLog(
+            "split_040c_parsed seq=${toHexByte(parsed.sequence)} " +
+                "left=${parsed.leftBattery} right=${parsed.rightBattery} case=${parsed.caseBattery} " +
+                "source=$receiveSource refreshId=${currentRefreshId()}"
+        )
+        updateState(
+            currentState.copy(
+                leftBatteryPercent = parsed.leftBattery,
+                rightBatteryPercent = parsed.rightBattery,
+                caseBatteryPercent = parsed.caseBattery,
+                lastUpdatedAt = notifyAt
+            )
+        )
+        setRefreshButtonBusy(false)
+    }
+
+    private fun accumulateSplitNotifyStats(
+        notifyAt: Long,
+        parsed: SplitBatteryFrame?
+    ) {
         val stats = synchronized(splitStatsLock) { splitRequestStats } ?: return
         if (stats.requestId != activeSplitRequestId) return
         if (notifyAt > stats.windowEndAt) return
