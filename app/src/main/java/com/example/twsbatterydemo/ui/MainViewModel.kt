@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import com.example.twsbatterydemo.ble.BleScannerManager
 import com.example.twsbatterydemo.model.BatteryReadUiState
 import com.example.twsbatterydemo.model.ScanUiState
+import com.example.twsbatterydemo.util.AppLogger
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -53,6 +54,7 @@ class MainViewModel(
             return
         }
 
+        AppLogger.d("MainViewModel", "refresh_requested targetMac=41:42:D3:16:6F:68")
         val started = bleScannerManager.refreshBattery(
             onLog = {},
             onState = ::updateBatteryState

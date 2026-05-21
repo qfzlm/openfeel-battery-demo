@@ -100,6 +100,7 @@ class BleScannerManager(
             onError("启动扫描失败")
             return false
         }
+        AppLogger.d("BleScannerManager", "scan_start mode=no_filter")
         onDebugLog?.invoke("scan_start mode=no_filter")
         return true
     }
@@ -116,11 +117,14 @@ class BleScannerManager(
         onLog: (String) -> Unit,
         onState: (BatteryReadUiState) -> Unit
     ): Boolean {
+        AppLogger.d("BleScannerManager", "refresh_enter")
         if (!hasRequiredPermissions()) {
+            AppLogger.e("BleScannerManager", "refresh_failed reason=missing_permissions")
             onLog("refresh_failed reason=missing_permissions")
             return false
         }
         if (!isBluetoothEnabled()) {
+            AppLogger.e("BleScannerManager", "refresh_failed reason=bluetooth_disabled")
             onLog("refresh_failed reason=bluetooth_disabled")
             return false
         }
@@ -147,6 +151,10 @@ class BleScannerManager(
         if (now - lastLoggedAt < TARGET_SCAN_LOG_INTERVAL_MS) return
 
         lastScanLogAtByMac[hit.macAddress] = now
+        AppLogger.d(
+            "BleScannerManager",
+            "scan_target_hit mac=${hit.macAddress} name=${hit.deviceName ?: "null"} rssi=${hit.rssi} reason=${hit.reason}"
+        )
         onDebugLog?.invoke(
             "scan_target_hit mac=${hit.macAddress} name=${hit.deviceName ?: "null"} " +
                 "rssi=${hit.rssi} reason=${hit.reason}"
