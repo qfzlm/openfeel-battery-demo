@@ -59,9 +59,17 @@
 
 用于比对 shadow 状态与旧变量一致性，不代表业务判断已迁移。
 
-## 5. 导出日志
+## 5. Logcat 日志
 
-- 先在 App 内导出日志到 Download。
+- Android Studio Logcat 推荐过滤：
+  - `level:DEBUG & package:com.budsbattery.app`
+  - `level:DEBUG & tag:MainViewModel`
+  - `level:DEBUG & tag:BleScannerManager`
+  - `level:DEBUG & tag:OpenFeelGattSession`
+- `adb logcat` 示例：
+  ```powershell
+  adb logcat -v time -s MainViewModel BleScannerManager OpenFeelGattSession
+  ```
 - 用同一轮刷新日志对齐 `refreshId` / `requestId` 做分析。
 
 ## 6. 不建议的排障方式

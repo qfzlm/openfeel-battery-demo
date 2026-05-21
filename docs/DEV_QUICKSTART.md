@@ -55,17 +55,24 @@ gradlew.bat :app:installDebug --no-daemon --console=plain
 
 1. 打开 App，点击“刷新电量”。
 2. 观察总电量与分电量是否更新。
-3. 导出日志并检查关键字：
+3. 在 Android Studio Logcat 或 `adb logcat` 中检查关键字：
    - `refresh_pipeline_start`
    - `battery_read_result`
    - `f2_raw_notify`
    - `split_040c_parsed`
    - `refresh_pipeline_summary`
 
-## 7. 日志导出
+## 7. Logcat 检查
 
-- 导出入口：App 内“导出日志”按钮。
-- 导出位置：Download（MediaStore）。
+- Android Studio Logcat 可用过滤：
+  - `level:DEBUG & package:com.budsbattery.app`
+  - `level:DEBUG & tag:MainViewModel`
+  - `level:DEBUG & tag:BleScannerManager`
+  - `level:DEBUG & tag:OpenFeelGattSession`
+- `adb logcat` 示例：
+  ```powershell
+  adb logcat -v time -s MainViewModel BleScannerManager OpenFeelGattSession
+  ```
 - 排障关键词见：[`troubleshooting.md`](troubleshooting.md)
 
 ## 8. 维护原则

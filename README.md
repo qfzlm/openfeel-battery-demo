@@ -14,7 +14,8 @@
 - 左耳 / 右耳 / 充电仓电量显示（私有 04 0C 帧）
 - 最近更新时间与连接状态显示
 - 刷新电量按钮
-- 导出日志按钮（导出到 Download）
+
+刷新只在用户点击按钮时触发；应用不会做后台周期刷新。
 
 ## 当前支持范围
 
@@ -50,13 +51,16 @@ app/build/outputs/apk/debug/app-debug.apk
 `refresh -> reuse/connect -> discover -> read 2A19 -> enable F2 notify -> write F1 -> receive F2 -> parse 04 0C`
 
 说明：
+- 这是手动点击触发的一次性读取链路。
+- 如果已有可用 GATT 连接和 characteristic cache，允许复用；连接复用不代表后台刷新。
 - 总电量由 `2A19` 提供稳定兜底。
 - 分电量来自 F2 通知中的 `DD ?? 04 0C XX YY ZZ AA`。
 
-## 日志与导出
+## Logcat 诊断
 
-- App 内支持导出日志到 Download（MediaStore 路径）。
-- 建议在真机验证时保留导出日志，用于对比刷新时序与解析结果。
+- 应用内日志查看和文件导出已删除。
+- 诊断日志通过 Android Studio Logcat 或 `adb logcat` 查看。
+- 常用 tag：`MainViewModel`、`BleScannerManager`、`OpenFeelGattSession`。
 - 排障关键词与路径见：[`docs/troubleshooting.md`](docs/troubleshooting.md)
 
 ## 近期工程改进（已完成）
@@ -74,6 +78,7 @@ app/build/outputs/apk/debug/app-debug.apk
 - 不是通用蓝牙耳机电量平台。
 - `left=0` 当前按设备上报值显示，后续可单独定义未知态策略。
 - 后台扫描入口已停用，刷新链路直接使用目标 MAC。
+- 不做后台周期刷新或后台监控。
 - 不猜测未验证协议，不自动发送未知命令。
 
 ## 开发文档
@@ -81,6 +86,7 @@ app/build/outputs/apk/debug/app-debug.apk
 - 架构说明：[`docs/architecture.md`](docs/architecture.md)
 - 开发快速开始：[`docs/DEV_QUICKSTART.md`](docs/DEV_QUICKSTART.md)
 - 排障指南：[`docs/troubleshooting.md`](docs/troubleshooting.md)
+- 当前状态：[`docs/CURRENT_STATUS.md`](docs/CURRENT_STATUS.md)
 
 ## 许可证
 
