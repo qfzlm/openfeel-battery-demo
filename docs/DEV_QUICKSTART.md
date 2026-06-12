@@ -74,9 +74,3 @@ gradlew.bat :app:installDebug --no-daemon --console=plain
   adb logcat -v time -s MainViewModel BleScannerManager OpenFeelGattSession
   ```
 - 排障关键词见：[`troubleshooting.md`](troubleshooting.md)
-
-## 8. 维护原则
-
-- 修改 BLE 时序前先建立日志基线。
-- 优先小步可回退改动。
-- 协议未验证部分不进入正式逻辑。

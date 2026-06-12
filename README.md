@@ -1,12 +1,11 @@
 # 弱水时砂 OpenFeel 电量（Android）
 
-这是一个针对弱水时砂 OpenFeel 系列耳机的 Android 电量读取工具，面向个人长期自用，目标是稳定读取总电量与左右耳/充电仓分电量。
+这是一个针对弱水时砂 OpenFeel 耳机的 Android 电量读取工具，目标是快速，稳定地读取电量，个人实测获取速度相较于官方app提升十倍以上
 
 ## 项目定位
 
-- 面向弱水时砂 OpenFeel 系列的已验证个人设备路径。
-- 当前按实测设备定向优化，不做通用多设备平台。
-- 优先保留已验证链路，不猜测未验证协议。
+- 面向弱水时砂 OpenFeel 耳机的已验证设备路径。
+- 当前按实测设备定向优化，未做通用多设备平台。
 
 ## 功能概览
 
@@ -78,15 +77,12 @@ app/build/outputs/apk/debug/app-debug.apk
 - 不是通用蓝牙耳机电量平台。
 - `left=0` 当前按设备上报值显示，后续可单独定义未知态策略。
 - 后台扫描入口已停用，刷新链路直接使用目标 MAC。
-- 不做后台周期刷新或后台监控。
-- 不猜测未验证协议，不自动发送未知命令。
 
 ## 开发文档
 
 - 架构说明：[`docs/architecture.md`](docs/architecture.md)
 - 开发快速开始：[`docs/DEV_QUICKSTART.md`](docs/DEV_QUICKSTART.md)
 - 排障指南：[`docs/troubleshooting.md`](docs/troubleshooting.md)
-- 当前状态：[`docs/CURRENT_STATUS.md`](docs/CURRENT_STATUS.md)
 
 ## 许可证
 

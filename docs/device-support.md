@@ -12,9 +12,3 @@
 - Total battery via `180F / 2A19`
 - Split battery via validated notify frame:
   - `DD ?? 04 0C XX YY ZZ AA`
-
-## What is not a current goal
-
-- Broad multi-device compatibility
-- Generic adapter layer for all brands
-- Formal charging-state UI semantics
